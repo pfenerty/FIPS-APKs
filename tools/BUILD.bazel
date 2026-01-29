@@ -1,0 +1,8 @@
+# Tools BUILD file
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "rpm_downloader.py",
+    "rpm_extract.py",
+])

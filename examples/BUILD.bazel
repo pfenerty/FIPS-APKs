@@ -1,0 +1,10 @@
+# Examples BUILD file
+
+package(default_visibility = ["//visibility:public"])
+
+# Hello world Java application
+java_binary(
+    name = "hello-java",
+    srcs = ["HelloWorld.java"],
+    main_class = "HelloWorld",
+)

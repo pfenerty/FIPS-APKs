@@ -1,0 +1,19 @@
+# RPM package management rules
+
+load("//rpm:fetch.bzl", "rpm_fetch")
+
+package(default_visibility = ["//visibility:public"])
+
+# Example: Fetch filesystem RPM (contains base directory structure)
+rpm_fetch(
+    name = "filesystem",
+    package = "filesystem",
+    repo = "baseos",
+)
+
+# Example: Fetch setup RPM (contains base config files)
+rpm_fetch(
+    name = "setup",
+    package = "setup",
+    repo = "baseos",
+)
