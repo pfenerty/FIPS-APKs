@@ -1,0 +1,28 @@
+# Java security properties override for FIPS mode.
+# Apply at runtime with:
+#   java -Djava.security.properties=/etc/java/fips.security ...
+# or via JAVA_TOOL_OPTIONS env var.
+#
+# Configures SunPKCS11 (backed by the OpenSSL FIPS provider) as the primary
+# JCA/JCE provider.  Non-FIPS providers (SunEC, SunJSSE default config, etc.)
+# are retained only where they do not conflict with FIPS policy.
+
+# Replace built-in providers with the PKCS11 FIPS provider as #1
+security.provider.1=SunPKCS11 /etc/java/pkcs11-fips.cfg
+security.provider.2=SUN
+security.provider.3=SunRsaSign
+security.provider.4=SunJSSE
+security.provider.5=SunJCE
+security.provider.6=SunJGSS
+security.provider.7=SunSASL
+security.provider.8=XMLDSig
+security.provider.9=SunPCSC
+
+# Require FIPS-approved TLS versions only
+jdk.tls.disabledAlgorithms=SSLv3, TLSv1, TLSv1.1, RC4, DES, MD5withRSA, \
+  DH keySize < 2048, EC keySize < 224, 3DES_EDE_CBC, anon, NULL, \
+  include jdk.disabled.namedCurves
+
+# Restrict key agreement to FIPS-approved algorithms
+jdk.certpath.disabledAlgorithms=MD2, MD5, SHA1 jdkCA & usage TLSServer, \
+  RSA keySize < 2048, DSA keySize < 2048, EC keySize < 224

@@ -1,5 +1,5 @@
-.bazel-*
-bazel-*
-*.pyc
-__pycache__/
+# apko build outputs
+*.tar
+*.sbom.json
+
 .DS_Store

@@ -1,0 +1,43 @@
+# FIPS-hardened Java 21 JRE image (public Wolfi packages)
+#
+# Java FIPS strategy — SunPKCS11 backed by the OpenSSL FIPS provider:
+#
+#   The OpenSSL FIPS provider module (CMVP #4282) is loaded into the JVM via
+#   the SunPKCS11 provider, making OpenSSL the cryptographic backend for Java
+#   operations (TLS, symmetric ciphers, hashes, signatures, key generation).
+#
+#   jitterentropy-library provides the userspace entropy source (SP 800-90B),
+#   allowing FIPS operation on any Linux kernel — no host FIPS kernel needed.
+#
+# NOTE: If you have access to Chainguard's commercial Wolfi packages, replace
+#   the SunPKCS11 approach with bouncycastle-fips + bctls-fips for a fully
+#   Java-native FIPS 140-3 stack (CMVP #4943).  That provides the BC-RNG-JENT
+#   entropy provider and eliminates the PKCS11 bridge entirely.
+#
+# Runtime FIPS activation (add to your container entrypoint or app startup):
+#   export JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security"
+#   (see images/java21/fips.security for the security providers override)
+
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+  repositories:
+    - https://packages.wolfi.dev/os
+  packages:
+    - wolfi-base
+    - ca-certificates-bundle
+    - openssl
+    - jitterentropy-library
+    - openjdk-21-jre
+    - openjdk-21-default-jvm
+
+environment:
+  JAVA_HOME: /usr/lib/jvm/java-21-openjdk
+  PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/jvm/java-21-openjdk/bin
+
+entrypoint:
+  command: /usr/lib/jvm/java-21-openjdk/bin/java
+
+archs:
+  - x86_64
+  - aarch64
