@@ -14,50 +14,13 @@ permissions:
 
 # ── Job graph ──────────────────────────────────────────────────────────────────
 #
-#   packages ──────────────────────┐
-#                                  └──▶ build-java21
-#   build-base  (independent)
+#   build-base   (independent)
+#   build-java21 (independent, builds its own packages via melange)
 #
-# build-base and packages run in parallel.
-# build-java21 waits for packages.
+# Both jobs run in parallel. build-java21 runs melange internally so there is
+# no separate packages job and no artifact passing between jobs.
 
 jobs:
-
-  # ── Build local APK packages (bouncycastle-fips + bctls-fips) ──────────────
-  packages:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Installs melange binary + bubblewrap (the sandboxed build runner)
-      - uses: chainguard-dev/actions/setup-melange@main
-
-      # Generate one ephemeral signing key shared across both package builds
-      - uses: chainguard-dev/actions/melange-keygen@main
-        with:
-          signing-key-path: ${{ github.workspace }}/melange.rsa
-
-      # Build both packages in one action call (multi-config).
-      # The action auto-adds packages/out as an extra repo for bctls-fips,
-      # which satisfies its runtime dependency on bouncycastle-fips.
-      - uses: chainguard-dev/actions/melange-build-pkg@main
-        with:
-          multi-config: >-
-            packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
-          archs: x86_64,aarch64
-          sign-with-key: true
-          signing-key-path: ${{ github.workspace }}/melange.rsa
-          repository-path: ${{ github.workspace }}/packages/out
-
-      # Upload packages + public key so build-java21 can consume them.
-      # Retention is 1 day — these are ephemeral build intermediates.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: local-packages
-          path: |
-            packages/out
-            melange.rsa.pub
-          retention-days: 1
 
   # ── Build fips-base ─────────────────────────────────────────────────────────
   build-base:
@@ -113,20 +76,41 @@ jobs:
           path: "*.sbom.json"
           if-no-files-found: ignore
 
-  # ── Build fips-java21 (requires local packages) ────────────────────────────
+  # ── Build fips-java21 ───────────────────────────────────────────────────────
+  #
+  # Follows the chainguard-dev/nginx-image-demo pattern: melange and apko run
+  # in the same job. The local APK repository and ephemeral signing key are
+  # written to /tmp, which apko-publish mounts into its Docker container
+  # (-v /tmp:/tmp), so they are accessible to apko at the same paths declared
+  # in images/java21/image.yaml.
   build-java21:
     runs-on: ubuntu-latest
-    needs: [packages]
     steps:
       - uses: actions/checkout@v4
 
-      # Restores packages/out/ and melange.rsa.pub at the workspace root
-      - name: Download local packages
-        uses: actions/download-artifact@v4
-        with:
-          name: local-packages
-          path: ${{ github.workspace }}
+      # ── Build local APK packages (bouncycastle-fips + bctls-fips) ──────────
+      - uses: chainguard-dev/actions/setup-melange@main
 
+      # Ephemeral signing key — only used to verify APK integrity within this run.
+      # Key pair lands in /tmp/melange.rsa + /tmp/melange.rsa.pub, matching the
+      # paths declared in images/java21/image.yaml.
+      - uses: chainguard-dev/actions/melange-keygen@main
+        with:
+          signing-key-path: /tmp/melange.rsa
+
+      # Build both packages sequentially (melange-build-pkg handles the ordering:
+      # on the second config it auto-adds /tmp/apk-packages as a dependency repo
+      # so bctls-fips can resolve its runtime dependency on bouncycastle-fips).
+      - uses: chainguard-dev/actions/melange-build-pkg@main
+        with:
+          multi-config: >-
+            packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
+          archs: x86_64,aarch64
+          sign-with-key: true
+          signing-key-path: /tmp/melange.rsa
+          repository-path: /tmp/apk-packages
+
+      # ── Build + publish image ───────────────────────────────────────────────
       - name: Compute image tag
         id: tags
         run: |
@@ -152,14 +136,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # repository-append and keyring-append are declared in images/java21/image.yaml
+      # (@local /tmp/apk-packages, /tmp/melange.rsa.pub) so no CLI flags needed here.
       - name: Publish
         id: publish
         uses: chainguard-images/actions/apko-publish@main
         with:
           config: images/java21/image.yaml
           tag: ${{ steps.tags.outputs.all }}
-          repository-append: file://${{ github.workspace }}/packages/out
-          keyring-append: ${{ github.workspace }}/melange.rsa.pub
 
       - name: Sign image
         if: github.event_name != 'pull_request'

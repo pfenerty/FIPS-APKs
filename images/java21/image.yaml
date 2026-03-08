@@ -23,10 +23,11 @@
 contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    - /tmp/melange.rsa.pub   # ephemeral key from this melange build
   repositories:
     - https://packages.wolfi.dev/os
-    # Local packages repository (bouncycastle-fips, bctls-fips).
-    # Passed at build time via --repository-append in the Makefile.
+    - '@local /tmp/apk-packages'   # bouncycastle-fips + bctls-fips built by melange
+    # For local builds, use: make packages (outputs to packages/out) then make java21
   packages:
     - wolfi-base
     - ca-certificates-bundle
