@@ -23,11 +23,13 @@
 contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
-    - /tmp/melange.rsa.pub   # ephemeral key from this melange build
+    - /github/workspace/melange.rsa.pub   # ephemeral key written by melange-keygen in CI
   repositories:
     - https://packages.wolfi.dev/os
-    - '@local /tmp/apk-packages'   # bouncycastle-fips + bctls-fips built by melange
-    # For local builds, use: make packages (outputs to packages/out) then make java21
+    - /github/workspace/apk-packages   # bouncycastle-fips + bctls-fips built by melange in CI
+    # /github/workspace is where GitHub Actions mounts $GITHUB_WORKSPACE inside
+    # the apko-build Docker container. For local builds the Makefile passes
+    # --repository-append and --keyring-append as CLI flags instead.
   packages:
     - wolfi-base
     - ca-certificates-bundle

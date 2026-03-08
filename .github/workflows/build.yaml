@@ -58,10 +58,11 @@ jobs:
 
       - name: Publish
         id: publish
-        uses: chainguard-images/actions/apko-publish@main
+        uses: chainguard-dev/actions/apko-build@main
         with:
           config: images/base/image.yaml
           tag: ${{ steps.tags.outputs.all }}
+          archs: x86_64,aarch64
 
       # Sign by digest using keyless cosign (Sigstore Fulcio CA + Rekor log)
       - name: Sign image
@@ -78,11 +79,11 @@ jobs:
 
   # ── Build fips-java21 ───────────────────────────────────────────────────────
   #
-  # Follows the chainguard-dev/nginx-image-demo pattern: melange and apko run
+  # Follows the chainguard-dev/hello-melange-apko pattern: melange and apko run
   # in the same job. The local APK repository and ephemeral signing key are
-  # written to /tmp, which apko-publish mounts into its Docker container
-  # (-v /tmp:/tmp), so they are accessible to apko at the same paths declared
-  # in images/java21/image.yaml.
+  # written to $GITHUB_WORKSPACE, which GitHub Actions mounts at /github/workspace
+  # inside the apko-build Docker container — matching the paths declared in
+  # images/java21/image.yaml.
   build-java21:
     runs-on: ubuntu-latest
     steps:
@@ -92,23 +93,25 @@ jobs:
       - uses: chainguard-dev/actions/setup-melange@main
 
       # Ephemeral signing key — only used to verify APK integrity within this run.
-      # Key pair lands in /tmp/melange.rsa + /tmp/melange.rsa.pub, matching the
-      # paths declared in images/java21/image.yaml.
+      # Key pair written to $GITHUB_WORKSPACE/melange.rsa{,.pub}, which is visible
+      # inside the apko-build container at /github/workspace/melange.rsa{,.pub}.
       - uses: chainguard-dev/actions/melange-keygen@main
         with:
-          signing-key-path: /tmp/melange.rsa
+          signing-key-path: ${{ github.workspace }}/melange.rsa
 
       # Build both packages sequentially (melange-build-pkg handles the ordering:
-      # on the second config it auto-adds /tmp/apk-packages as a dependency repo
+      # on the second config it auto-adds the repository-path as a dependency repo
       # so bctls-fips can resolve its runtime dependency on bouncycastle-fips).
+      # Packages land in $GITHUB_WORKSPACE/apk-packages/{x86_64,aarch64}/, visible
+      # inside the apko-build container at /github/workspace/apk-packages/.
       - uses: chainguard-dev/actions/melange-build-pkg@main
         with:
           multi-config: >-
             packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
           archs: x86_64,aarch64
           sign-with-key: true
-          signing-key-path: /tmp/melange.rsa
-          repository-path: /tmp/apk-packages
+          signing-key-path: ${{ github.workspace }}/melange.rsa
+          repository-path: ${{ github.workspace }}/apk-packages
 
       # ── Build + publish image ───────────────────────────────────────────────
       - name: Compute image tag
@@ -136,14 +139,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # repository-append and keyring-append are declared in images/java21/image.yaml
-      # (@local /tmp/apk-packages, /tmp/melange.rsa.pub) so no CLI flags needed here.
+      # Package paths and keyring are declared in images/java21/image.yaml as
+      # /github/workspace/... (the container-visible mount of $GITHUB_WORKSPACE).
+      # keyring-append here passes the pub key as a CLI flag for belt-and-suspenders.
       - name: Publish
         id: publish
-        uses: chainguard-images/actions/apko-publish@main
+        uses: chainguard-dev/actions/apko-build@main
         with:
           config: images/java21/image.yaml
           tag: ${{ steps.tags.outputs.all }}
+          keyring-append: /github/workspace/melange.rsa.pub
+          archs: x86_64,aarch64
 
       - name: Sign image
         if: github.event_name != 'pull_request'
