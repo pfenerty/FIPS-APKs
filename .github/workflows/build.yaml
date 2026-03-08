@@ -59,42 +59,32 @@ jobs:
             melange.rsa.pub
           retention-days: 1
 
-  # ── Build fips-base (no local packages needed) ─────────────────────────────
+  # ── Build fips-base ─────────────────────────────────────────────────────────
   build-base:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute image tags
+      # PRs publish to ttl.sh (free ephemeral registry, auto-deleted after 1h).
+      # push/tag publishes to ghcr.io with :latest and optionally :<semver>.
+      - name: Compute image tag
         id: tags
         run: |
-          BASE="ghcr.io/${{ github.repository_owner }}/fips-base"
-          TAGS="${BASE}:latest"
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "all=ttl.sh/fips-base-pr${{ github.event.pull_request.number }}:1h" >> $GITHUB_OUTPUT
+          else
+            BASE="ghcr.io/${{ github.repository_owner }}/fips-base"
+            TAGS="${BASE}:latest"
+            [[ "${{ github.ref_type }}" == "tag" ]] && TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+            echo "all=${TAGS}" >> $GITHUB_OUTPUT
+            echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
           fi
-          echo "all=${TAGS}" >> $GITHUB_OUTPUT
-          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
-
-      # PR: build only — validates the apko config without pushing.
-      # Must override ENTRYPOINT and pass the command via -c, matching the
-      # pattern used by chainguard-images/actions/apko-publish internally.
-      - name: Build (PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          docker run --rm \
-            --network host \
-            --entrypoint /bin/sh \
-            -v "${{ github.workspace }}:${{ github.workspace }}" \
-            -v /tmp:/tmp \
-            --workdir "${{ github.workspace }}" \
-            ghcr.io/wolfi-dev/sdk:latest \
-            -c "/usr/bin/apko build images/base/image.yaml fips-base:pr /tmp/fips-base.tar"
 
       - name: Set up cosign
         if: github.event_name != 'pull_request'
         uses: sigstore/cosign-installer@v3
 
+      # ttl.sh requires no auth; only log in for production pushes
       - name: Log in to ghcr.io
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -103,19 +93,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # main / tag: publish multi-arch image directly to the registry.
-      # Space-separated tags in `tag` are word-split by the shell inside the
-      # action, so apko receives them as separate positional arguments and
-      # creates one manifest list with all requested tags.
       - name: Publish
         id: publish
-        if: github.event_name != 'pull_request'
         uses: chainguard-images/actions/apko-publish@main
         with:
           config: images/base/image.yaml
           tag: ${{ steps.tags.outputs.all }}
 
-      # Sign by digest (precise) using keyless cosign (Sigstore Fulcio + Rekor)
+      # Sign by digest using keyless cosign (Sigstore Fulcio CA + Rekor log)
       - name: Sign image
         if: github.event_name != 'pull_request'
         run: cosign sign --yes ${{ steps.publish.outputs.digest }}
@@ -142,32 +127,18 @@ jobs:
           name: local-packages
           path: ${{ github.workspace }}
 
-      - name: Compute image tags
+      - name: Compute image tag
         id: tags
         run: |
-          BASE="ghcr.io/${{ github.repository_owner }}/fips-java21"
-          TAGS="${BASE}:latest"
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "all=ttl.sh/fips-java21-pr${{ github.event.pull_request.number }}:1h" >> $GITHUB_OUTPUT
+          else
+            BASE="ghcr.io/${{ github.repository_owner }}/fips-java21"
+            TAGS="${BASE}:latest"
+            [[ "${{ github.ref_type }}" == "tag" ]] && TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+            echo "all=${TAGS}" >> $GITHUB_OUTPUT
+            echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
           fi
-          echo "all=${TAGS}" >> $GITHUB_OUTPUT
-          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
-
-      # PR: build only
-      - name: Build (PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          docker run --rm \
-            --network host \
-            --entrypoint /bin/sh \
-            -v "${{ github.workspace }}:${{ github.workspace }}" \
-            -v /tmp:/tmp \
-            --workdir "${{ github.workspace }}" \
-            ghcr.io/wolfi-dev/sdk:latest \
-            -c "/usr/bin/apko build images/java21/image.yaml \
-              --repository-append 'file://${{ github.workspace }}/packages/out' \
-              -k melange.rsa.pub \
-              fips-java21:pr /tmp/fips-java21.tar"
 
       - name: Set up cosign
         if: github.event_name != 'pull_request'
@@ -183,7 +154,6 @@ jobs:
 
       - name: Publish
         id: publish
-        if: github.event_name != 'pull_request'
         uses: chainguard-images/actions/apko-publish@main
         with:
           config: images/java21/image.yaml
