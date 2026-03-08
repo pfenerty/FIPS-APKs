@@ -1,0 +1,188 @@
+name: Build FIPS Images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write   # push to ghcr.io
+  id-token: write   # cosign keyless OIDC
+
+# ── Job graph ──────────────────────────────────────────────────────────────────
+#
+#   packages ──────────────────────┐
+#                                  └──▶ build-java21
+#   build-base  (independent)
+#
+# build-base and packages run in parallel.
+# build-java21 waits for packages.
+
+jobs:
+
+  # ── Build local APK packages (bouncycastle-fips + bctls-fips) ──────────────
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up melange
+        uses: chainguard-dev/actions/setup-melange@main
+
+      - name: Generate ephemeral signing key
+        run: melange keygen melange.rsa
+
+      - name: Build bouncycastle-fips
+        run: |
+          melange build packages/bouncycastle-fips/melange.yaml \
+            --arch x86_64,aarch64 \
+            --runner docker \
+            --signing-key melange.rsa \
+            --out-dir packages/out
+
+      - name: Build bctls-fips
+        run: |
+          melange build packages/bctls-fips/melange.yaml \
+            --arch x86_64,aarch64 \
+            --runner docker \
+            --signing-key melange.rsa \
+            --out-dir packages/out
+
+      # Upload packages + public key so build-java21 can consume them.
+      # Retention is 1 day — these are ephemeral build intermediates.
+      - name: Upload local packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-packages
+          path: |
+            packages/out
+            melange.rsa.pub
+          retention-days: 1
+
+  # ── Build fips-base (no local packages needed) ─────────────────────────────
+  build-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up apko
+        uses: chainguard-dev/actions/setup-apko@main
+
+      - name: Set up cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          BASE="ghcr.io/${{ github.repository_owner }}/fips-base"
+          TAGS="${BASE}:latest"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+          fi
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
+
+      # PR: build only (validates the config without pushing)
+      - name: Build (PR)
+        if: github.event_name == 'pull_request'
+        run: apko build images/base/image.yaml fips-base:pr fips-base.tar
+
+      # main / tag: publish multi-arch image directly to the registry
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        run: apko publish images/base/image.yaml ${{ steps.tags.outputs.tags }}
+
+      # Sign with keyless cosign (Sigstore Fulcio CA + Rekor transparency log)
+      - name: Sign image
+        if: github.event_name != 'pull_request'
+        run: cosign sign --yes ${{ steps.tags.outputs.primary }}
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-base
+          path: "*.sbom.json"
+          if-no-files-found: ignore
+
+  # ── Build fips-java21 (requires local packages) ────────────────────────────
+  build-java21:
+    runs-on: ubuntu-latest
+    needs: [packages]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Restores packages/out/ and melange.rsa.pub at the workspace root
+      - name: Download local packages
+        uses: actions/download-artifact@v4
+        with:
+          name: local-packages
+          path: ${{ github.workspace }}
+
+      - name: Set up apko
+        uses: chainguard-dev/actions/setup-apko@main
+
+      - name: Set up cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        run: |
+          BASE="ghcr.io/${{ github.repository_owner }}/fips-java21"
+          TAGS="${BASE}:latest"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+          fi
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
+
+      # PR: build only
+      - name: Build (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          apko build images/java21/image.yaml \
+            --repository-append "file://${{ github.workspace }}/packages/out" \
+            --keyring-append melange.rsa.pub \
+            fips-java21:pr fips-java21.tar
+
+      # main / tag: publish
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        run: |
+          apko publish images/java21/image.yaml \
+            --repository-append "file://${{ github.workspace }}/packages/out" \
+            --keyring-append melange.rsa.pub \
+            ${{ steps.tags.outputs.tags }}
+
+      - name: Sign image
+        if: github.event_name != 'pull_request'
+        run: cosign sign --yes ${{ steps.tags.outputs.primary }}
+
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-java21
+          path: "*.sbom.json"
+          if-no-files-found: ignore
