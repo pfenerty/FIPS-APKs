@@ -1,28 +1,32 @@
-# FIPS-hardened Java 21 JRE image (public Wolfi packages)
+# FIPS-hardened Java 21 JRE image
 #
-# Java FIPS strategy — SunPKCS11 backed by the OpenSSL FIPS provider:
+# Java FIPS strategy — BouncyCastle FIPS (BC-FJA 2.1.2, CMVP #4943):
 #
-#   The OpenSSL FIPS provider module (CMVP #4282) is loaded into the JVM via
-#   the SunPKCS11 provider, making OpenSSL the cryptographic backend for Java
-#   operations (TLS, symmetric ciphers, hashes, signatures, key generation).
+#   BouncyCastleFipsProvider  — JCA/JCE provider for all symmetric ciphers,
+#                               hashes, MACs, key generation, and signatures.
+#                               Seeded via BC-RNG-JENT (SHA-256 DRBG +
+#                               jitterentropy-library SP 800-90B entropy source).
 #
-#   jitterentropy-library provides the userspace entropy source (SP 800-90B),
-#   allowing FIPS operation on any Linux kernel — no host FIPS kernel needed.
+#   BouncyCastleJsseProvider  — JSSE provider for TLS 1.2/1.3 using only
+#                               FIPS-approved cipher suites and key sizes.
 #
-# NOTE: If you have access to Chainguard's commercial Wolfi packages, replace
-#   the SunPKCS11 approach with bouncycastle-fips + bctls-fips for a fully
-#   Java-native FIPS 140-3 stack (CMVP #4943).  That provides the BC-RNG-JENT
-#   entropy provider and eliminates the PKCS11 bridge entirely.
+# Both providers are kernel-independent: entropy comes from jitterentropy-library
+# (userspace), so no FIPS-mode kernel is required on the host.
 #
-# Runtime FIPS activation (add to your container entrypoint or app startup):
-#   export JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security"
-#   (see images/java21/fips.security for the security providers override)
+# bouncycastle-fips and bctls-fips are local packages built with melange.
+# Build them first with `make packages`, then build this image with `make java21`.
+#
+# Runtime FIPS security properties are in fips.security.
+# Set at startup with:
+#   JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security"
 
 contents:
   keyring:
     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
   repositories:
     - https://packages.wolfi.dev/os
+    # Local packages repository (bouncycastle-fips, bctls-fips).
+    # Passed at build time via --repository-append in the Makefile.
   packages:
     - wolfi-base
     - ca-certificates-bundle
@@ -30,10 +34,14 @@ contents:
     - jitterentropy-library
     - openjdk-21-jre
     - openjdk-21-default-jvm
+    - bouncycastle-fips
+    - bctls-fips
 
 environment:
   JAVA_HOME: /usr/lib/jvm/java-21-openjdk
   PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/jvm/java-21-openjdk/bin
+  # BC FIPS JARs on the default classpath so providers are always resolvable
+  CLASSPATH: /usr/share/java/bc-fips.jar:/usr/share/java/bctls-fips.jar
 
 entrypoint:
   command: /usr/lib/jvm/java-21-openjdk/bin/java

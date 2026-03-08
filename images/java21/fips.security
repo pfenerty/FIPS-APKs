@@ -1,28 +1,36 @@
-# Java security properties override for FIPS mode.
-# Apply at runtime with:
-#   java -Djava.security.properties=/etc/java/fips.security ...
-# or via JAVA_TOOL_OPTIONS env var.
+# Java security properties override for BouncyCastle FIPS mode.
 #
-# Configures SunPKCS11 (backed by the OpenSSL FIPS provider) as the primary
-# JCA/JCE provider.  Non-FIPS providers (SunEC, SunJSSE default config, etc.)
-# are retained only where they do not conflict with FIPS policy.
+# Apply at startup with:
+#   java -Djava.security.properties=/etc/java/fips.security ...
+# or via environment variable (set in the image):
+#   JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security"
+#
+# Provider stack:
+#   1. BouncyCastleFipsProvider — all JCA/JCE operations (ciphers, hashes,
+#      MACs, key generation, signatures). Seeded by BC-RNG-JENT which uses
+#      jitterentropy-library (NIST SP 800-90B) for kernel-independent entropy.
+#   2. BouncyCastleJsseProvider — FIPS TLS 1.2/1.3 (backed by provider #1).
+#   3. SUN — retained for non-cryptographic services (e.g. policy, XML sig).
+#
+# DRBG configuration: C:DEFRND[SHA256:JENT]
+#   SHA256 — SHA-256 based DRBG (SP 800-90A)
+#   JENT   — seed from BC-RNG-JENT (jitterentropy, SP 800-90B)
+#   ENABLE{ALL} — allow all approved algorithms
 
-# Replace built-in providers with the PKCS11 FIPS provider as #1
-security.provider.1=SunPKCS11 /etc/java/pkcs11-fips.cfg
-security.provider.2=SUN
-security.provider.3=SunRsaSign
-security.provider.4=SunJSSE
-security.provider.5=SunJCE
-security.provider.6=SunJGSS
-security.provider.7=SunSASL
-security.provider.8=XMLDSig
-security.provider.9=SunPCSC
+security.provider.1=org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider C:DEFRND[SHA256:JENT];ENABLE{ALL};
+security.provider.2=org.bouncycastle.jsse.provider.BouncyCastleJsseProvider fips:BCFIPS
+security.provider.3=SUN
+security.provider.4=SunRsaSign
+security.provider.5=SunJGSS
+security.provider.6=SunSASL
+security.provider.7=XMLDSig
+security.provider.8=SunPCSC
 
-# Require FIPS-approved TLS versions only
+# Restrict TLS to FIPS-approved versions and cipher suites
 jdk.tls.disabledAlgorithms=SSLv3, TLSv1, TLSv1.1, RC4, DES, MD5withRSA, \
   DH keySize < 2048, EC keySize < 224, 3DES_EDE_CBC, anon, NULL, \
   include jdk.disabled.namedCurves
 
-# Restrict key agreement to FIPS-approved algorithms
+# Restrict certificate path validation
 jdk.certpath.disabledAlgorithms=MD2, MD5, SHA1 jdkCA & usage TLSServer, \
   RSA keySize < 2048, DSA keySize < 2048, EC keySize < 224
