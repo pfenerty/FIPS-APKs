@@ -76,16 +76,20 @@ jobs:
           echo "all=${TAGS}" >> $GITHUB_OUTPUT
           echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
 
-      # PR: build only — validates the apko config without pushing
+      # PR: build only — validates the apko config without pushing.
+      # Must override ENTRYPOINT and pass the command via -c, matching the
+      # pattern used by chainguard-images/actions/apko-publish internally.
       - name: Build (PR)
         if: github.event_name == 'pull_request'
         run: |
           docker run --rm \
             --network host \
+            --entrypoint /bin/sh \
             -v "${{ github.workspace }}:${{ github.workspace }}" \
+            -v /tmp:/tmp \
             --workdir "${{ github.workspace }}" \
             ghcr.io/wolfi-dev/sdk:latest \
-            /usr/bin/apko build images/base/image.yaml fips-base:pr /tmp/fips-base.tar
+            -c "/usr/bin/apko build images/base/image.yaml fips-base:pr /tmp/fips-base.tar"
 
       - name: Set up cosign
         if: github.event_name != 'pull_request'
@@ -155,13 +159,15 @@ jobs:
         run: |
           docker run --rm \
             --network host \
+            --entrypoint /bin/sh \
             -v "${{ github.workspace }}:${{ github.workspace }}" \
+            -v /tmp:/tmp \
             --workdir "${{ github.workspace }}" \
             ghcr.io/wolfi-dev/sdk:latest \
-            /usr/bin/apko build images/java21/image.yaml \
-              --repository-append "file://${{ github.workspace }}/packages/out" \
+            -c "/usr/bin/apko build images/java21/image.yaml \
+              --repository-append 'file://${{ github.workspace }}/packages/out' \
               -k melange.rsa.pub \
-              fips-java21:pr /tmp/fips-java21.tar
+              fips-java21:pr /tmp/fips-java21.tar"
 
       - name: Set up cosign
         if: github.event_name != 'pull_request'
