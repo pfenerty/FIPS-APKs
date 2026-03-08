@@ -1,0 +1,40 @@
+package:
+  name: bouncycastle-fips
+  version: 2.1.2
+  epoch: 0
+  description: "BouncyCastle FIPS Java API (BC-FJA 2.1.2) — FIPS 140-3 Level 1 JCA/JCE provider (CMVP #4943)"
+  copyright:
+    - license: MIT
+      paths:
+        - usr/share/java/*
+
+  dependencies:
+    runtime:
+      # jitterentropy shared library is loaded at runtime by BC-RNG-JENT
+      - jitterentropy-library
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - wolfi-base
+
+pipeline:
+  # Download the FIPS-validated JAR from Maven Central.
+  # SHA-256 matches the .sha256 file published at:
+  #   https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.2/bc-fips-2.1.2.jar.sha256
+  - uses: fetch
+    with:
+      uri: https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.2/bc-fips-2.1.2.jar
+      expected-sha256: 044fcd8a29d236edea8a5b414406cdae63b475f9ad9f05fe2dc904a277941115
+      extract: false
+
+  - runs: |
+      install -Dm644 bc-fips-2.1.2.jar \
+        "${{targets.destdir}}/usr/share/java/bc-fips-2.1.2.jar"
+      # Stable unversioned symlink for use in CLASSPATH / --module-path
+      ln -sf bc-fips-2.1.2.jar \
+        "${{targets.destdir}}/usr/share/java/bc-fips.jar"

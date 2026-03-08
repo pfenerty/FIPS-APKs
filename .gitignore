@@ -1,5 +1,12 @@
-.bazel-*
-bazel-*
-*.pyc
-__pycache__/
+# apko build outputs
+*.tar
+*.sbom.json
+
+# melange signing keys (generated locally, never commit)
+melange.rsa
+melange.rsa.pub
+
+# melange-built local APKs
+packages/out/
+
 .DS_Store

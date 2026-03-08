@@ -1,0 +1,52 @@
+# FIPS-hardened Java 21 JRE image
+#
+# Java FIPS strategy — BouncyCastle FIPS (BC-FJA 2.1.2, CMVP #4943):
+#
+#   BouncyCastleFipsProvider  — JCA/JCE provider for all symmetric ciphers,
+#                               hashes, MACs, key generation, and signatures.
+#                               Seeded via BC-RNG-JENT (SHA-256 DRBG +
+#                               jitterentropy-library SP 800-90B entropy source).
+#
+#   BouncyCastleJsseProvider  — JSSE provider for TLS 1.2/1.3 using only
+#                               FIPS-approved cipher suites and key sizes.
+#
+# Both providers are kernel-independent: entropy comes from jitterentropy-library
+# (userspace), so no FIPS-mode kernel is required on the host.
+#
+# bouncycastle-fips and bctls-fips are local packages built with melange.
+# Build them first with `make packages`, then build this image with `make java21`.
+#
+# Runtime FIPS security properties are in fips.security.
+# Set at startup with:
+#   JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security"
+
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    - /tmp/melange.rsa.pub   # ephemeral key from this melange build
+  repositories:
+    - https://packages.wolfi.dev/os
+    - '@local /tmp/apk-packages'   # bouncycastle-fips + bctls-fips built by melange
+    # For local builds, use: make packages (outputs to packages/out) then make java21
+  packages:
+    - wolfi-base
+    - ca-certificates-bundle
+    - openssl
+    - jitterentropy-library
+    - openjdk-21-jre
+    - openjdk-21-default-jvm
+    - bouncycastle-fips
+    - bctls-fips
+
+environment:
+  JAVA_HOME: /usr/lib/jvm/java-21-openjdk
+  PATH: /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/lib/jvm/java-21-openjdk/bin
+  # BC FIPS JARs on the default classpath so providers are always resolvable
+  CLASSPATH: /usr/share/java/bc-fips.jar:/usr/share/java/bctls-fips.jar
+
+entrypoint:
+  command: /usr/lib/jvm/java-21-openjdk/bin/java
+
+archs:
+  - x86_64
+  - aarch64
