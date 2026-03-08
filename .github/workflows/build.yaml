@@ -29,32 +29,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up melange
-        uses: chainguard-dev/actions/setup-melange@main
+      # Installs melange binary + bubblewrap (the sandboxed build runner)
+      - uses: chainguard-dev/actions/setup-melange@main
 
-      - name: Generate ephemeral signing key
-        run: melange keygen melange.rsa
+      # Generate one ephemeral signing key shared across both package builds
+      - uses: chainguard-dev/actions/melange-keygen@main
+        with:
+          signing-key-path: ${{ github.workspace }}/melange.rsa
 
-      - name: Build bouncycastle-fips
-        run: |
-          melange build packages/bouncycastle-fips/melange.yaml \
-            --arch x86_64,aarch64 \
-            --runner docker \
-            --signing-key melange.rsa \
-            --out-dir packages/out
-
-      - name: Build bctls-fips
-        run: |
-          melange build packages/bctls-fips/melange.yaml \
-            --arch x86_64,aarch64 \
-            --runner docker \
-            --signing-key melange.rsa \
-            --out-dir packages/out
+      # Build both packages in one action call (multi-config).
+      # The action auto-adds packages/out as an extra repo for bctls-fips,
+      # which satisfies its runtime dependency on bouncycastle-fips.
+      - uses: chainguard-dev/actions/melange-build-pkg@main
+        with:
+          multi-config: >-
+            packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
+          archs: x86_64,aarch64
+          sign-with-key: true
+          signing-key-path: ${{ github.workspace }}/melange.rsa
+          repository-path: ${{ github.workspace }}/packages/out
 
       # Upload packages + public key so build-java21 can consume them.
       # Retention is 1 day — these are ephemeral build intermediates.
-      - name: Upload local packages
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: local-packages
           path: |
@@ -68,8 +65,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up apko
-        uses: chainguard-dev/actions/setup-apko@main
+      - name: Compute image tags
+        id: tags
+        run: |
+          BASE="ghcr.io/${{ github.repository_owner }}/fips-base"
+          TAGS="${BASE}:latest"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+          fi
+          echo "all=${TAGS}" >> $GITHUB_OUTPUT
+          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
+
+      # PR: build only — validates the apko config without pushing
+      - name: Build (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:${{ github.workspace }}" \
+            --workdir "${{ github.workspace }}" \
+            ghcr.io/wolfi-dev/sdk:latest \
+            /usr/bin/apko build images/base/image.yaml fips-base:pr /tmp/fips-base.tar
 
       - name: Set up cosign
         if: github.event_name != 'pull_request'
@@ -83,31 +99,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image tags
-        id: tags
-        run: |
-          BASE="ghcr.io/${{ github.repository_owner }}/fips-base"
-          TAGS="${BASE}:latest"
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
-
-      # PR: build only (validates the config without pushing)
-      - name: Build (PR)
-        if: github.event_name == 'pull_request'
-        run: apko build images/base/image.yaml fips-base:pr fips-base.tar
-
-      # main / tag: publish multi-arch image directly to the registry
+      # main / tag: publish multi-arch image directly to the registry.
+      # Space-separated tags in `tag` are word-split by the shell inside the
+      # action, so apko receives them as separate positional arguments and
+      # creates one manifest list with all requested tags.
       - name: Publish
+        id: publish
         if: github.event_name != 'pull_request'
-        run: apko publish images/base/image.yaml ${{ steps.tags.outputs.tags }}
+        uses: chainguard-images/actions/apko-publish@main
+        with:
+          config: images/base/image.yaml
+          tag: ${{ steps.tags.outputs.all }}
 
-      # Sign with keyless cosign (Sigstore Fulcio CA + Rekor transparency log)
+      # Sign by digest (precise) using keyless cosign (Sigstore Fulcio + Rekor)
       - name: Sign image
         if: github.event_name != 'pull_request'
-        run: cosign sign --yes ${{ steps.tags.outputs.primary }}
+        run: cosign sign --yes ${{ steps.publish.outputs.digest }}
 
       - name: Upload SBOM
         if: always()
@@ -131,8 +138,30 @@ jobs:
           name: local-packages
           path: ${{ github.workspace }}
 
-      - name: Set up apko
-        uses: chainguard-dev/actions/setup-apko@main
+      - name: Compute image tags
+        id: tags
+        run: |
+          BASE="ghcr.io/${{ github.repository_owner }}/fips-java21"
+          TAGS="${BASE}:latest"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
+          fi
+          echo "all=${TAGS}" >> $GITHUB_OUTPUT
+          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
+
+      # PR: build only
+      - name: Build (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          docker run --rm \
+            --network host \
+            -v "${{ github.workspace }}:${{ github.workspace }}" \
+            --workdir "${{ github.workspace }}" \
+            ghcr.io/wolfi-dev/sdk:latest \
+            /usr/bin/apko build images/java21/image.yaml \
+              --repository-append "file://${{ github.workspace }}/packages/out" \
+              -k melange.rsa.pub \
+              fips-java21:pr /tmp/fips-java21.tar
 
       - name: Set up cosign
         if: github.event_name != 'pull_request'
@@ -146,38 +175,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image tags
-        id: tags
-        run: |
-          BASE="ghcr.io/${{ github.repository_owner }}/fips-java21"
-          TAGS="${BASE}:latest"
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
-          fi
-          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
-          echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
-
-      # PR: build only
-      - name: Build (PR)
-        if: github.event_name == 'pull_request'
-        run: |
-          apko build images/java21/image.yaml \
-            --repository-append "file://${{ github.workspace }}/packages/out" \
-            --keyring-append melange.rsa.pub \
-            fips-java21:pr fips-java21.tar
-
-      # main / tag: publish
       - name: Publish
+        id: publish
         if: github.event_name != 'pull_request'
-        run: |
-          apko publish images/java21/image.yaml \
-            --repository-append "file://${{ github.workspace }}/packages/out" \
-            --keyring-append melange.rsa.pub \
-            ${{ steps.tags.outputs.tags }}
+        uses: chainguard-images/actions/apko-publish@main
+        with:
+          config: images/java21/image.yaml
+          tag: ${{ steps.tags.outputs.all }}
+          repository-append: file://${{ github.workspace }}/packages/out
+          keyring-append: ${{ github.workspace }}/melange.rsa.pub
 
       - name: Sign image
         if: github.event_name != 'pull_request'
-        run: cosign sign --yes ${{ steps.tags.outputs.primary }}
+        run: cosign sign --yes ${{ steps.publish.outputs.digest }}
 
       - name: Upload SBOM
         if: always()

@@ -2,15 +2,7 @@ package:
   name: bctls-fips
   version: 2.1.22
   epoch: 0
-  description: >
-    BouncyCastle FIPS TLS provider (BCTLS-FJA 2.1.22) — FIPS 140-3 compliant
-    JSSE provider built on top of the bouncycastle-fips JCA core.
-
-    Provides BouncyCastleJsseProvider, which implements TLS 1.2 and TLS 1.3
-    using only FIPS-approved algorithms.  Must be used alongside bouncycastle-fips.
-
-    The JAR is the exact binary from Maven Central
-    (org.bouncycastle:bctls-fips:2.1.22); fetched without recompilation.
+  description: "BouncyCastle FIPS TLS provider (BCTLS-FJA 2.1.22) — FIPS 140-3 JSSE provider for TLS 1.2/1.3"
   copyright:
     - license: MIT
       paths:
