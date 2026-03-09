@@ -97,22 +97,35 @@ jobs:
         with:
           signing-key-path: /tmp/melange.rsa
 
-      # Build both packages sequentially; output lands in /tmp/apk-packages.
-      - uses: chainguard-dev/actions/melange-build-pkg@main
-        with:
-          multi-config: >-
-            packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
-          archs: x86_64,aarch64
-          sign-with-key: true
-          signing-key-path: /tmp/melange.rsa
-          repository-path: /tmp/apk-packages
-
-      # Copy packages + key into the workspace so apko-publish can reach them
-      # through its guaranteed bind-mount (-v $PWD:${{ github.workspace }}).
-      # /tmp is not reliably visible inside that container, but the workspace is.
-      - name: Stage packages for apko
+      # Build packages directly (bypass melange-build-pkg action whose out-dir
+      # handling is opaque). Output + staging are fully visible in the step logs.
+      - name: Build local APK packages
         run: |
-          cp -r /tmp/apk-packages "${{ github.workspace }}/apk-packages"
+          set -euo pipefail
+          OUTDIR="${{ github.workspace }}/apk-packages"
+          sudo mkdir -p "$OUTDIR"
+
+          echo "=== building bouncycastle-fips ==="
+          sudo melange build packages/bouncycastle-fips/melange.yaml \
+            --arch x86_64,aarch64 \
+            --out-dir "$OUTDIR" \
+            --signing-key /tmp/melange.rsa
+
+          echo "=== building bctls-fips ==="
+          sudo melange build packages/bctls-fips/melange.yaml \
+            --arch x86_64,aarch64 \
+            --out-dir "$OUTDIR" \
+            --repository-append "file://$OUTDIR" \
+            --keyring-append /tmp/melange.rsa.pub \
+            --signing-key /tmp/melange.rsa
+
+          sudo chown -R "$(id -un):$(id -gn)" "$OUTDIR"
+
+          echo "=== built artefacts ==="
+          find "$OUTDIR" \( -name "*.apk" -o -name "APKINDEX.tar.gz" \) | sort
+
+          # Copy public key into workspace so apko-publish can reach it through
+          # the same bind-mount as the packages.
           cp /tmp/melange.rsa.pub "${{ github.workspace }}/melange.rsa.pub"
 
       # ── Build + publish image ───────────────────────────────────────────────
