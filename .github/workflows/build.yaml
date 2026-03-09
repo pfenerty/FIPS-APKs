@@ -136,14 +136,17 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # repository-append and keyring-append are declared in images/java21/image.yaml
-      # (@local /tmp/apk-packages, /tmp/melange.rsa.pub) so no CLI flags needed here.
+      # Local packages are in /tmp (bind-mounted via -v /tmp:/tmp in the apko container).
+      # file:///tmp/apk-packages adds them as a regular unnamed repo for all architectures,
+      # matching the same --repository-append pattern used by the Makefile.
       - name: Publish
         id: publish
         uses: chainguard-images/actions/apko-publish@main
         with:
           config: images/java21/image.yaml
           tag: ${{ steps.tags.outputs.all }}
+          repository-append: file:///tmp/apk-packages
+          keyring-append: /tmp/melange.rsa.pub
 
       - name: Sign image
         if: github.event_name != 'pull_request'
