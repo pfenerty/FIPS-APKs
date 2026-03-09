@@ -37,10 +37,10 @@ packages-bctls: packages-bc
 
 ## Remove build artefacts
 clean:
-	rm -f *.tar *.sbom.json
+	@echo "Nothing to clean (packages cleaned via clean-packages)"
 
 ## Remove locally built APK packages and signing keys
-clean-packages: clean
+clean-packages:
 	rm -rf $(PACKAGES_DIR) $(SIGNING_KEY) $(SIGNING_KEY).pub
 
 ## Show this help
