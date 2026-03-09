@@ -92,14 +92,12 @@ jobs:
       - uses: chainguard-dev/actions/setup-melange@main
 
       # Ephemeral signing key — only used to verify APK integrity within this run.
-      # Key pair lands in /tmp/melange.rsa + /tmp/melange.rsa.pub, matching the
-      # paths declared in images/java21/image.yaml.
       - uses: chainguard-dev/actions/melange-keygen@main
         with:
-          signing-key-path: /tmp/melange.rsa
+          signing-key-path: ${{ github.workspace }}/melange.rsa
 
       # Build both packages sequentially (melange-build-pkg handles the ordering:
-      # on the second config it auto-adds /tmp/apk-packages as a dependency repo
+      # on the second config it auto-adds apk-packages/ as a dependency repo
       # so bctls-fips can resolve its runtime dependency on bouncycastle-fips).
       - uses: chainguard-dev/actions/melange-build-pkg@main
         with:
@@ -107,8 +105,8 @@ jobs:
             packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
           archs: x86_64,aarch64
           sign-with-key: true
-          signing-key-path: /tmp/melange.rsa
-          repository-path: /tmp/apk-packages
+          signing-key-path: ${{ github.workspace }}/melange.rsa
+          repository-path: ${{ github.workspace }}/apk-packages
 
       # ── Build + publish image ───────────────────────────────────────────────
       - name: Compute image tag
@@ -136,17 +134,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Local packages are in /tmp (bind-mounted via -v /tmp:/tmp in the apko container).
-      # file:///tmp/apk-packages adds them as a regular unnamed repo for all architectures,
-      # matching the same --repository-append pattern used by the Makefile.
+      # Packages are in the workspace, which apko-publish bind-mounts at the same
+      # absolute path (-v $PWD:${{ github.workspace }}), so file:// resolves correctly.
       - name: Publish
         id: publish
         uses: chainguard-images/actions/apko-publish@main
         with:
           config: images/java21/image.yaml
           tag: ${{ steps.tags.outputs.all }}
-          repository-append: file:///tmp/apk-packages
-          keyring-append: /tmp/melange.rsa.pub
+          repository-append: file://${{ github.workspace }}/apk-packages
+          keyring-append: ${{ github.workspace }}/melange.rsa.pub
 
       - name: Sign image
         if: github.event_name != 'pull_request'
