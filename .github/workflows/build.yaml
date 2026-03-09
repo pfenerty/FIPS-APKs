@@ -97,14 +97,14 @@ jobs:
         with:
           signing-key-path: /tmp/melange.rsa
 
-      # Build packages directly (bypass melange-build-pkg action whose out-dir
-      # handling is opaque). Write to /tmp/apk-packages — the apko-publish action
-      # explicitly mounts -v /tmp:/tmp so this path is always visible inside the
-      # container, unlike the workspace (whose $PWD bind-mount target varies).
+      # Build packages directly and serve them over HTTP so the apko-publish
+      # action can reach them. The action uses --network host, so any port we
+      # open on the runner is reachable at localhost inside its container — this
+      # bypasses all Docker volume-mount path issues entirely.
       - name: Build local APK packages
         run: |
           set -euo pipefail
-          OUTDIR="/tmp/apk-packages"
+          OUTDIR="${{ github.workspace }}/apk-packages"
           sudo mkdir -p "$OUTDIR"
 
           echo "=== building bouncycastle-fips ==="
@@ -125,6 +125,23 @@ jobs:
 
           echo "=== built artefacts ==="
           find "$OUTDIR" \( -name "*.apk" -o -name "APKINDEX.tar.gz" \) | sort
+
+      - name: Serve packages via HTTP
+        run: |
+          # Serve apk-packages/ at http://localhost:8765 — apko uses --network
+          # host so this is reachable from inside the apko-publish container.
+          python3 -m http.server 8765 \
+            --directory "${{ github.workspace }}/apk-packages" \
+            --bind 127.0.0.1 &
+          echo $! > /tmp/http-server.pid
+          # Wait until the index is actually reachable before continuing.
+          for i in $(seq 15); do
+            curl -sf http://localhost:8765/x86_64/APKINDEX.tar.gz -o /dev/null && break
+            sleep 1
+          done
+          curl -sf http://localhost:8765/x86_64/APKINDEX.tar.gz -o /dev/null \
+            || { echo "ERROR: HTTP server not ready after 15 s"; exit 1; }
+          echo "HTTP server ready at http://localhost:8765"
 
       # ── Build + publish image ───────────────────────────────────────────────
       - name: Compute image tag
@@ -158,8 +175,12 @@ jobs:
         with:
           config: images/java21/image.yaml
           tag: ${{ steps.tags.outputs.all }}
-          repository-append: file:///tmp/apk-packages
+          repository-append: http://localhost:8765
           keyring-append: /tmp/melange.rsa.pub
+
+      - name: Stop HTTP server
+        if: always()
+        run: kill $(cat /tmp/http-server.pid) || true
 
       - name: Sign image
         if: github.event_name != 'pull_request'
