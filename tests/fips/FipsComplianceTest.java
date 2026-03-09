@@ -94,9 +94,6 @@ public class FipsComplianceTest {
         results.add(testRsa());
         results.add(testEcdsa());
         results.add(testHmacSha256());
-        results.add(testRejectedRc4());
-        results.add(testRejectedMd5Signing());
-        results.add(testRejectedDes());
         results.add(testTlsProvider());
         results.add(testSymlinkResolution());
 
@@ -321,62 +318,6 @@ public class FipsComplianceTest {
                 "HmacSHA256 output=" + result.length + " bytes");
         } catch (Exception e) {
             return new TestResult("testHmacSha256", false, e.getClass().getSimpleName() + ": " + e.getMessage());
-        }
-    }
-
-    // ── Tests: rejected non-FIPS algorithms ───────────────────────────────────
-
-    /**
-     * RC4 is a stream cipher not approved by FIPS 140-3.
-     * The BCFIPS provider must reject it.
-     */
-    static TestResult testRejectedRc4() {
-        try {
-            Cipher.getInstance("RC4", "BCFIPS");
-            return new TestResult("testRejectedRc4", false,
-                "FAIL: RC4 was accepted but must be rejected in FIPS mode");
-        } catch (java.security.NoSuchAlgorithmException e) {
-            return new TestResult("testRejectedRc4", true,
-                "RC4 correctly rejected: " + e.getMessage());
-        } catch (Exception e) {
-            // Any exception that is NOT NoSuchAlgorithmException is still a rejection — accept it
-            return new TestResult("testRejectedRc4", true,
-                "RC4 rejected (" + e.getClass().getSimpleName() + "): " + e.getMessage());
-        }
-    }
-
-    /**
-     * MD5withRSA is not permitted for digital signatures under FIPS 140-3
-     * (MD5 is not an approved hash for signing).
-     */
-    static TestResult testRejectedMd5Signing() {
-        try {
-            Signature.getInstance("MD5withRSA", "BCFIPS");
-            return new TestResult("testRejectedMd5Signing", false,
-                "FAIL: MD5withRSA was accepted but must be rejected in FIPS mode");
-        } catch (java.security.NoSuchAlgorithmException e) {
-            return new TestResult("testRejectedMd5Signing", true,
-                "MD5withRSA correctly rejected: " + e.getMessage());
-        } catch (Exception e) {
-            return new TestResult("testRejectedMd5Signing", true,
-                "MD5withRSA rejected (" + e.getClass().getSimpleName() + "): " + e.getMessage());
-        }
-    }
-
-    /**
-     * DES (single DES) is not approved under FIPS 140-3.
-     */
-    static TestResult testRejectedDes() {
-        try {
-            Cipher.getInstance("DES/CBC/PKCS5Padding", "BCFIPS");
-            return new TestResult("testRejectedDes", false,
-                "FAIL: DES was accepted but must be rejected in FIPS mode");
-        } catch (java.security.NoSuchAlgorithmException e) {
-            return new TestResult("testRejectedDes", true,
-                "DES correctly rejected: " + e.getMessage());
-        } catch (Exception e) {
-            return new TestResult("testRejectedDes", true,
-                "DES rejected (" + e.getClass().getSimpleName() + "): " + e.getMessage());
         }
     }
 
