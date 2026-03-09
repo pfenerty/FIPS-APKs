@@ -1,0 +1,38 @@
+package:
+  name: bcutil-fips
+  version: 2.1.5
+  epoch: 0
+  description: "BouncyCastle FIPS utility library (bcutil-fips 2.1.5) — ASN.1 and supporting utilities required by bctls-fips"
+  copyright:
+    - license: MIT
+      paths:
+        - usr/share/java/*
+
+  dependencies:
+    runtime:
+      - bouncycastle-fips
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - wolfi-base
+
+pipeline:
+  # Download from Maven Central.
+  # SHA-256 matches:
+  #   https://repo1.maven.org/maven2/org/bouncycastle/bcutil-fips/2.1.5/bcutil-fips-2.1.5.jar.sha256
+  - uses: fetch
+    with:
+      uri: https://repo1.maven.org/maven2/org/bouncycastle/bcutil-fips/2.1.5/bcutil-fips-2.1.5.jar
+      expected-sha256: 503aaf5c2c5b7c729547462efe13699b5f6dacf9be150b7c48bba974b793dc92
+      extract: false
+
+  - runs: |
+      install -Dm644 bcutil-fips-2.1.5.jar \
+        "${{targets.destdir}}/usr/share/java/bcutil-fips-2.1.5.jar"
+      ln -sf bcutil-fips-2.1.5.jar \
+        "${{targets.destdir}}/usr/share/java/bcutil-fips.jar"
