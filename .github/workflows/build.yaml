@@ -167,7 +167,7 @@ jobs:
 
               # Trust the build signing key and register the local APK repo
               cp /apk-packages/melange.rsa.pub /etc/apk/keys/
-              echo "/apk-packages/x86_64" >> /etc/apk/repositories
+              echo "/apk-packages" >> /etc/apk/repositories
               apk update
 
               # Install the packages under test (pulls in jitterentropy-library via dep)
