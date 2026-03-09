@@ -3,7 +3,7 @@ MELANGE ?= melange
 PACKAGES_DIR := $(CURDIR)/packages/out
 SIGNING_KEY  := $(CURDIR)/melange.rsa
 
-.PHONY: packages packages-bc packages-bctls keys clean clean-packages help
+.PHONY: packages packages-bc packages-bcutil packages-bctls keys clean clean-packages help
 
 ## ── Keys ─────────────────────────────────────────────────────────────────────
 
@@ -15,8 +15,8 @@ $(SIGNING_KEY):
 
 ## ── Local APK packages ───────────────────────────────────────────────────────
 
-## Build bouncycastle-fips and bctls-fips APKs for x86_64 and aarch64
-packages: packages-bc packages-bctls
+## Build all three APKs (bouncycastle-fips, bcutil-fips, bctls-fips) for x86_64 and aarch64
+packages: packages-bc packages-bcutil packages-bctls
 
 packages-bc: $(SIGNING_KEY)
 	$(MELANGE) build packages/bouncycastle-fips/melange.yaml \
@@ -24,9 +24,16 @@ packages-bc: $(SIGNING_KEY)
 	    --signing-key $(SIGNING_KEY) \
 	    --out-dir $(PACKAGES_DIR)
 
-## bctls-fips depends on bouncycastle-fips, so packages-bc must run first and
-## its output directory is passed as --dependency-dir for resolution.
-packages-bctls: packages-bc
+## bcutil-fips depends on bouncycastle-fips; packages-bc must run first.
+packages-bcutil: packages-bc
+	$(MELANGE) build packages/bcutil-fips/melange.yaml \
+	    --arch x86_64,aarch64 \
+	    --signing-key $(SIGNING_KEY) \
+	    --out-dir $(PACKAGES_DIR) \
+	    --dependency-dir $(PACKAGES_DIR)
+
+## bctls-fips depends on bouncycastle-fips and bcutil-fips; both must run first.
+packages-bctls: packages-bcutil
 	$(MELANGE) build packages/bctls-fips/melange.yaml \
 	    --arch x86_64,aarch64 \
 	    --signing-key $(SIGNING_KEY) \
