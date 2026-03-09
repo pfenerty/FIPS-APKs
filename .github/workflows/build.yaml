@@ -163,7 +163,7 @@ jobs:
             sh -c '
               set -e
               # Install JDK and APK tooling
-              apk add --no-cache openjdk-21-jdk apk-tools
+              apk add --no-cache openjdk-21 apk-tools
 
               # Trust the build signing key and register the local APK repo
               cp /apk-packages/melange.rsa.pub /etc/apk/keys/
