@@ -28,7 +28,7 @@ TEST_SRC="${SCRIPT_DIR}/FipsComplianceTest.java"
 CLASSES_DIR=/tmp/fips-classes
 OUTPUT_FILE=/tmp/fips-output.txt
 
-JARS="/usr/share/java/bc-fips.jar:/usr/share/java/bctls-fips.jar"
+JARS="/usr/share/java/bc-fips.jar:/usr/share/java/bcutil-fips.jar:/usr/share/java/bctls-fips.jar"
 
 mkdir -p "$REPORT_DIR" "$CLASSES_DIR"
 

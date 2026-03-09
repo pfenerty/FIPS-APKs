@@ -85,11 +85,20 @@ jobs:
           openssl pkey -in /tmp/melange.rsa -pubout -out /tmp/melange.rsa.pub
 
       # Build bouncycastle-fips first; its output dir becomes the dependency
-      # repo for bctls-fips so the runtime dep can be resolved at build time.
+      # repo for bcutil-fips and bctls-fips so runtime deps resolve at build time.
       - name: Build bouncycastle-fips
         uses: chainguard-dev/actions/melange-build-pkg@main
         with:
           config: packages/bouncycastle-fips/melange.yaml
+          archs: x86_64,aarch64
+          sign-with-key: true
+          signing-key-path: /tmp/melange.rsa
+          repository-path: /tmp/apk-packages
+
+      - name: Build bcutil-fips
+        uses: chainguard-dev/actions/melange-build-pkg@main
+        with:
+          config: packages/bcutil-fips/melange.yaml
           archs: x86_64,aarch64
           sign-with-key: true
           signing-key-path: /tmp/melange.rsa
@@ -171,7 +180,7 @@ jobs:
               apk update
 
               # Install the packages under test (pulls in jitterentropy-library via dep)
-              apk add --no-cache bouncycastle-fips bctls-fips
+              apk add --no-cache bouncycastle-fips bcutil-fips bctls-fips
 
               # Run the compliance test suite
               sh /repo/tests/fips/run-fips-tests.sh
