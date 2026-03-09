@@ -91,22 +91,29 @@ jobs:
       # ── Build local APK packages (bouncycastle-fips + bctls-fips) ──────────
       - uses: chainguard-dev/actions/setup-melange@main
 
-      # Ephemeral signing key — only used to verify APK integrity within this run.
+      # Ephemeral signing key — /tmp is writable by root (sudo melange) and is
+      # bind-mounted inside the apko-publish container via -v /tmp:/tmp.
       - uses: chainguard-dev/actions/melange-keygen@main
         with:
-          signing-key-path: ${{ github.workspace }}/melange.rsa
+          signing-key-path: /tmp/melange.rsa
 
-      # Build both packages sequentially (melange-build-pkg handles the ordering:
-      # on the second config it auto-adds apk-packages/ as a dependency repo
-      # so bctls-fips can resolve its runtime dependency on bouncycastle-fips).
+      # Build both packages sequentially; output lands in /tmp/apk-packages.
       - uses: chainguard-dev/actions/melange-build-pkg@main
         with:
           multi-config: >-
             packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
           archs: x86_64,aarch64
           sign-with-key: true
-          signing-key-path: ${{ github.workspace }}/melange.rsa
-          repository-path: ${{ github.workspace }}/apk-packages
+          signing-key-path: /tmp/melange.rsa
+          repository-path: /tmp/apk-packages
+
+      # Copy packages + key into the workspace so apko-publish can reach them
+      # through its guaranteed bind-mount (-v $PWD:${{ github.workspace }}).
+      # /tmp is not reliably visible inside that container, but the workspace is.
+      - name: Stage packages for apko
+        run: |
+          cp -r /tmp/apk-packages "${{ github.workspace }}/apk-packages"
+          cp /tmp/melange.rsa.pub "${{ github.workspace }}/melange.rsa.pub"
 
       # ── Build + publish image ───────────────────────────────────────────────
       - name: Compute image tag
@@ -134,8 +141,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Packages are in the workspace, which apko-publish bind-mounts at the same
-      # absolute path (-v $PWD:${{ github.workspace }}), so file:// resolves correctly.
       - name: Publish
         id: publish
         uses: chainguard-images/actions/apko-publish@main
