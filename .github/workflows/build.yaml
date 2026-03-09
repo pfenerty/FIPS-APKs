@@ -98,11 +98,13 @@ jobs:
           signing-key-path: /tmp/melange.rsa
 
       # Build packages directly (bypass melange-build-pkg action whose out-dir
-      # handling is opaque). Output + staging are fully visible in the step logs.
+      # handling is opaque). Write to /tmp/apk-packages — the apko-publish action
+      # explicitly mounts -v /tmp:/tmp so this path is always visible inside the
+      # container, unlike the workspace (whose $PWD bind-mount target varies).
       - name: Build local APK packages
         run: |
           set -euo pipefail
-          OUTDIR="${{ github.workspace }}/apk-packages"
+          OUTDIR="/tmp/apk-packages"
           sudo mkdir -p "$OUTDIR"
 
           echo "=== building bouncycastle-fips ==="
@@ -123,10 +125,6 @@ jobs:
 
           echo "=== built artefacts ==="
           find "$OUTDIR" \( -name "*.apk" -o -name "APKINDEX.tar.gz" \) | sort
-
-          # Copy public key into workspace so apko-publish can reach it through
-          # the same bind-mount as the packages.
-          cp /tmp/melange.rsa.pub "${{ github.workspace }}/melange.rsa.pub"
 
       # ── Build + publish image ───────────────────────────────────────────────
       - name: Compute image tag
@@ -160,8 +158,8 @@ jobs:
         with:
           config: images/java21/image.yaml
           tag: ${{ steps.tags.outputs.all }}
-          repository-append: file://${{ github.workspace }}/apk-packages
-          keyring-append: ${{ github.workspace }}/melange.rsa.pub
+          repository-append: file:///tmp/apk-packages
+          keyring-append: /tmp/melange.rsa.pub
 
       - name: Sign image
         if: github.event_name != 'pull_request'
