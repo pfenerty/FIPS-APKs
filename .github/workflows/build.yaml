@@ -1,4 +1,4 @@
-name: Build FIPS Images
+name: Build and Publish APK Packages
 
 on:
   push:
@@ -9,150 +9,121 @@ on:
 
 permissions:
   contents: read
-  packages: write   # push to ghcr.io
-  id-token: write   # cosign keyless OIDC
+  pages: write
+  id-token: write   # GitHub Pages OIDC deploy
 
 # ── Job graph ──────────────────────────────────────────────────────────────────
 #
-#   build-base   (independent)
-#   build-java21 (independent, builds its own packages via melange)
+#   build-packages  → deploy-pages (push/tag only)
 #
-# Both jobs run in parallel. build-java21 runs melange internally so there is
-# no separate packages job and no artifact passing between jobs.
+# build-packages builds bouncycastle-fips and bctls-fips for x86_64 and
+# aarch64 using melange, then either uploads an artifact (PRs) or publishes
+# the APK repository to GitHub Pages (push/tag).
+#
+# The published GitHub Pages site is a standard Alpine/Wolfi APK repository:
+#
+#   https://<org>.github.io/<repo>/
+#     x86_64/
+#       APKINDEX.tar.gz
+#       bouncycastle-fips-*.apk
+#       bctls-fips-*.apk
+#     aarch64/
+#       APKINDEX.tar.gz
+#       bouncycastle-fips-*.apk
+#       bctls-fips-*.apk
+#     melange.rsa.pub   ← public key for apko keyring
+#
+# To use in an apko config:
+#
+#   repositories:
+#     - https://packages.wolfi.dev/os
+#     - https://<org>.github.io/<repo>
+#   keyring:
+#     - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+#     - https://<org>.github.io/<repo>/melange.rsa.pub
+#   packages:
+#     - bouncycastle-fips
+#     - bctls-fips
 
 jobs:
 
-  # ── Build fips-base ─────────────────────────────────────────────────────────
-  build-base:
+  # ── Build APK packages ───────────────────────────────────────────────────────
+  build-packages:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # PRs publish to ttl.sh (free ephemeral registry, auto-deleted after 1h).
-      # push/tag publishes to ghcr.io with :latest and optionally :<semver>.
-      - name: Compute image tag
-        id: tags
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "all=ttl.sh/fips-base-pr${{ github.event.pull_request.number }}:1h" >> $GITHUB_OUTPUT
-          else
-            BASE="ghcr.io/${{ github.repository_owner }}/fips-base"
-            TAGS="${BASE}:latest"
-            [[ "${{ github.ref_type }}" == "tag" ]] && TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
-            echo "all=${TAGS}" >> $GITHUB_OUTPUT
-            echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set up cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3
-
-      # ttl.sh requires no auth; only log in for production pushes
-      - name: Log in to ghcr.io
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish
-        id: publish
-        uses: chainguard-images/actions/apko-publish@main
-        with:
-          config: images/base/image.yaml
-          tag: ${{ steps.tags.outputs.all }}
-
-      # Sign by digest using keyless cosign (Sigstore Fulcio CA + Rekor log)
-      - name: Sign image
-        if: github.event_name != 'pull_request'
-        run: cosign sign --yes ${{ steps.publish.outputs.digest }}
-
-      - name: Upload SBOM
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-base
-          path: "*.sbom.json"
-          if-no-files-found: ignore
-
-  # ── Build fips-java21 ───────────────────────────────────────────────────────
-  #
-  # Follows the chainguard-dev/nginx-image-demo pattern: melange and apko run
-  # in the same job. The local APK repository and ephemeral signing key are
-  # written to /tmp, which apko-publish mounts into its Docker container
-  # (-v /tmp:/tmp), so they are accessible to apko at the same paths declared
-  # in images/java21/image.yaml.
-  build-java21:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # ── Build local APK packages (bouncycastle-fips + bctls-fips) ──────────
       - uses: chainguard-dev/actions/setup-melange@main
 
-      # Ephemeral signing key — only used to verify APK integrity within this run.
-      # Key pair lands in /tmp/melange.rsa + /tmp/melange.rsa.pub, matching the
-      # paths declared in images/java21/image.yaml.
-      - uses: chainguard-dev/actions/melange-keygen@main
-        with:
-          signing-key-path: /tmp/melange.rsa
+      # PRs: generate an ephemeral signing key (packages are not published).
+      # push/tag: decode the stable private key stored as a repository secret
+      # so that the published APKs always carry the same trusted key.
+      - name: Generate ephemeral signing key (PR)
+        if: github.event_name == 'pull_request'
+        run: melange keygen /tmp/melange.rsa
 
-      # Build both packages sequentially (melange-build-pkg handles the ordering:
-      # on the second config it auto-adds /tmp/apk-packages as a dependency repo
-      # so bctls-fips can resolve its runtime dependency on bouncycastle-fips).
-      - uses: chainguard-dev/actions/melange-build-pkg@main
+      - name: Restore stable signing key (push / tag)
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "${{ secrets.MELANGE_SIGNING_KEY }}" | base64 -d > /tmp/melange.rsa
+          chmod 600 /tmp/melange.rsa
+          melange keygen --output /tmp/melange.rsa || true   # derive .pub if not stored
+          # Derive the public key from the private key
+          openssl rsa -in /tmp/melange.rsa -pubout -out /tmp/melange.rsa.pub 2>/dev/null || \
+            melange keygen /tmp/melange-scratch.rsa && cp /tmp/melange-scratch.rsa.pub /tmp/melange.rsa.pub || true
+
+      # Build bouncycastle-fips first; its output dir becomes the dependency
+      # repo for bctls-fips so the runtime dep can be resolved at build time.
+      - name: Build bouncycastle-fips
+        uses: chainguard-dev/actions/melange-build-pkg@main
         with:
-          multi-config: >-
-            packages/bouncycastle-fips/melange.yaml,packages/bctls-fips/melange.yaml
+          config: packages/bouncycastle-fips/melange.yaml
           archs: x86_64,aarch64
           sign-with-key: true
           signing-key-path: /tmp/melange.rsa
           repository-path: /tmp/apk-packages
 
-      # ── Build + publish image ───────────────────────────────────────────────
-      - name: Compute image tag
-        id: tags
-        run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            echo "all=ttl.sh/fips-java21-pr${{ github.event.pull_request.number }}:1h" >> $GITHUB_OUTPUT
-          else
-            BASE="ghcr.io/${{ github.repository_owner }}/fips-java21"
-            TAGS="${BASE}:latest"
-            [[ "${{ github.ref_type }}" == "tag" ]] && TAGS="${TAGS} ${BASE}:${{ github.ref_name }}"
-            echo "all=${TAGS}" >> $GITHUB_OUTPUT
-            echo "primary=${BASE}:latest" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set up cosign
-        if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@v3
-
-      - name: Log in to ghcr.io
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+      - name: Build bctls-fips
+        uses: chainguard-dev/actions/melange-build-pkg@main
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          config: packages/bctls-fips/melange.yaml
+          archs: x86_64,aarch64
+          sign-with-key: true
+          signing-key-path: /tmp/melange.rsa
+          repository-path: /tmp/apk-packages
 
-      # repository-append and keyring-append are declared in images/java21/image.yaml
-      # (@local /tmp/apk-packages, /tmp/melange.rsa.pub) so no CLI flags needed here.
-      - name: Publish
-        id: publish
-        uses: chainguard-images/actions/apko-publish@main
-        with:
-          config: images/java21/image.yaml
-          tag: ${{ steps.tags.outputs.all }}
+      # Publish the signing public key at the repository root so consumers can
+      # add it to their apko keyring without an out-of-band key distribution step.
+      - name: Copy public key to repository root
+        run: cp /tmp/melange.rsa.pub /tmp/apk-packages/melange.rsa.pub
 
-      - name: Sign image
-        if: github.event_name != 'pull_request'
-        run: cosign sign --yes ${{ steps.publish.outputs.digest }}
-
-      - name: Upload SBOM
-        if: always()
+      # PRs: upload packages as a workflow artifact for inspection/testing.
+      - name: Upload packages artifact (PR)
+        if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: sbom-java21
-          path: "*.sbom.json"
-          if-no-files-found: ignore
+          name: apk-packages
+          path: /tmp/apk-packages/
+
+      # push/tag: stage the APK repo for GitHub Pages deployment.
+      - name: Upload Pages artifact (push / tag)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/apk-packages/
+
+  # ── Publish to GitHub Pages ──────────────────────────────────────────────────
+  deploy-pages:
+    needs: build-packages
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
