@@ -14,13 +14,23 @@ permissions:
 
 # ── Job graph ──────────────────────────────────────────────────────────────────
 #
-#   build-packages  → deploy-pages (push/tag only)
+#   build-packages  →  fips-compliance  →  deploy-pages (push/tag only)
 #
 # build-packages builds bouncycastle-fips and bctls-fips for x86_64 and
-# aarch64 using melange, then either uploads an artifact (PRs) or publishes
-# the APK repository to GitHub Pages (push/tag).
+# aarch64 using melange.  It uploads two artifacts:
+#   apk-packages-test   — consumed by fips-compliance (all events)
+#   apk-packages-pages  — consumed by deploy-pages (push/tag only)
 #
-# The published GitHub Pages site is a standard Alpine/Wolfi APK repository:
+# fips-compliance installs the freshly-built APKs in a Wolfi container and
+# runs FipsComplianceTest.java, verifying:
+#   • JAR SHA-256 matches the CMVP-certified artifact
+#   • BC-FIPS Power-On Self-Tests pass
+#   • FIPS-approved algorithms work; non-FIPS algorithms are rejected
+#   • TLS provider (bctls-fips) registers and provides TLSv1.3
+# It uploads a fips-compliance-report artifact (Markdown + HTML).
+#
+# deploy-pages merges the APK repo and the compliance report HTML, then
+# publishes the combined directory to GitHub Pages:
 #
 #   https://<org>.github.io/<repo>/
 #     x86_64/
@@ -31,7 +41,8 @@ permissions:
 #       APKINDEX.tar.gz
 #       bouncycastle-fips-*.apk
 #       bctls-fips-*.apk
-#     melange.rsa.pub   ← public key for apko keyring
+#     melange.rsa.pub
+#     compliance-report.html   ← FIPS compliance evidence
 #
 # To use in an apko config:
 #
@@ -98,7 +109,24 @@ jobs:
       - name: Copy public key to repository root
         run: cp /tmp/melange.rsa.pub /tmp/apk-packages/melange.rsa.pub
 
-      # PRs: upload packages as a workflow artifact for inspection/testing.
+      # Upload packages for the fips-compliance job (all events).
+      - name: Upload packages for compliance testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-packages-test
+          path: /tmp/apk-packages/
+          retention-days: 1
+
+      # push/tag only: upload packages for the deploy-pages job.
+      - name: Upload packages for Pages deployment (push / tag)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-packages-pages
+          path: /tmp/apk-packages/
+          retention-days: 1
+
+      # PRs: also upload as the plain "apk-packages" artifact for inspection.
       - name: Upload packages artifact (PR)
         if: github.event_name == 'pull_request'
         uses: actions/upload-artifact@v4
@@ -106,16 +134,69 @@ jobs:
           name: apk-packages
           path: /tmp/apk-packages/
 
-      # push/tag: stage the APK repo for GitHub Pages deployment.
-      - name: Upload Pages artifact (push / tag)
-        if: github.event_name != 'pull_request'
-        uses: actions/upload-pages-artifact@v3
+  # ── FIPS compliance testing ───────────────────────────────────────────────────
+  fips-compliance:
+    needs: build-packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download built packages
+        uses: actions/download-artifact@v4
         with:
-          path: /tmp/apk-packages/
+          name: apk-packages-test
+          path: /tmp/apk-packages
+
+      - name: Run FIPS compliance tests
+        run: |
+          mkdir -p /tmp/fips-report
+          docker run --rm \
+            -v /tmp/apk-packages:/apk-packages:ro \
+            -v "${{ github.workspace }}/tests":/repo/tests:ro \
+            -v /tmp/fips-report:/tmp/fips-report \
+            -e GITHUB_RUN_ID="${{ github.run_id }}" \
+            -e GITHUB_SHA="${{ github.sha }}" \
+            -e GITHUB_REF_NAME="${{ github.ref_name }}" \
+            -e GITHUB_REPOSITORY="${{ github.repository }}" \
+            -e REPORT_DIR=/tmp/fips-report \
+            cgr.dev/chainguard/wolfi-base \
+            sh -c '
+              set -e
+              # Install JDK and APK tooling
+              apk add --no-cache openjdk-21-jdk apk-tools
+
+              # Trust the build signing key and register the local APK repo
+              cp /apk-packages/melange.rsa.pub /etc/apk/keys/
+              echo "/apk-packages/x86_64" >> /etc/apk/repositories
+              apk update
+
+              # Install the packages under test (pulls in jitterentropy-library via dep)
+              apk add --no-cache bouncycastle-fips bctls-fips
+
+              # Run the compliance test suite
+              sh /repo/tests/fips/run-fips-tests.sh
+            '
+
+      # Always upload the report so it is available for inspection even on failure
+      - name: Upload compliance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fips-compliance-report
+          path: /tmp/fips-report/
+
+      # Read the exit code written by run-fips-tests.sh and fail the job if non-zero
+      - name: Fail job if tests failed
+        run: |
+          code=$(cat /tmp/fips-report/exit-code.txt 2>/dev/null || echo 1)
+          if [ "$code" -ne 0 ]; then
+            echo "::error::FIPS compliance tests failed (exit code $code). Download the fips-compliance-report artifact for details."
+            exit "$code"
+          fi
 
   # ── Publish to GitHub Pages ──────────────────────────────────────────────────
   deploy-pages:
-    needs: build-packages
+    needs: [build-packages, fips-compliance]
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     environment:
@@ -125,6 +206,28 @@ jobs:
       pages: write
       id-token: write
     steps:
+      - name: Download APK packages
+        uses: actions/download-artifact@v4
+        with:
+          name: apk-packages-pages
+          path: /tmp/pages-content
+
+      - name: Download compliance report
+        uses: actions/download-artifact@v4
+        with:
+          name: fips-compliance-report
+          path: /tmp/compliance-report
+
+      # Merge the compliance report HTML into the APK repository directory
+      # so it is served alongside the packages at <pages-url>/compliance-report.html
+      - name: Merge compliance report into Pages content
+        run: cp /tmp/compliance-report/compliance-report.html /tmp/pages-content/compliance-report.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/pages-content/
+
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
