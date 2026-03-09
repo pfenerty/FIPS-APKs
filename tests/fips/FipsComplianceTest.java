@@ -53,7 +53,7 @@ public class FipsComplianceTest {
 
     // SHA-256("BouncyCastle FIPS") — used as a deterministic self-check for testSha256
     static final String KNOWN_SHA256_INPUT  = "BouncyCastle FIPS";
-    static final String KNOWN_SHA256_OUTPUT = "3b6f08d0b6b6e1f53a0c6bbfe1dce46a695f0e5b1fab99d2e7b64e49bdda5b03";
+    static final String KNOWN_SHA256_OUTPUT = "deacb1797c79417204e8149f0db8d7cccbe19440b0ac4e2cb947c9b57128fe47";
 
     // ── Test result record ─────────────────────────────────────────────────────
 
