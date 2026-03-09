@@ -1,18 +1,9 @@
-APKO    ?= apko
 MELANGE ?= melange
 
-REGISTRY    ?= localhost
 PACKAGES_DIR := $(CURDIR)/packages/out
 SIGNING_KEY  := $(CURDIR)/melange.rsa
 
-BASE_REF   := $(REGISTRY)/fips-base:latest
-JAVA21_REF := $(REGISTRY)/fips-java21:latest
-
-.PHONY: all base java21 packages packages-bc packages-bctls \
-        load-base load-java21 keys clean clean-packages help
-
-## Build everything (packages then images)
-all: base java21
+.PHONY: packages packages-bc packages-bctls keys clean clean-packages help
 
 ## ── Keys ─────────────────────────────────────────────────────────────────────
 
@@ -24,7 +15,7 @@ $(SIGNING_KEY):
 
 ## ── Local APK packages ───────────────────────────────────────────────────────
 
-## Build bouncycastle-fips and bctls-fips APKs
+## Build bouncycastle-fips and bctls-fips APKs for x86_64 and aarch64
 packages: packages-bc packages-bctls
 
 packages-bc: $(SIGNING_KEY)
@@ -33,35 +24,18 @@ packages-bc: $(SIGNING_KEY)
 	    --signing-key $(SIGNING_KEY) \
 	    --out-dir $(PACKAGES_DIR)
 
+## bctls-fips depends on bouncycastle-fips, so packages-bc must run first and
+## its output directory is passed as --dependency-dir for resolution.
 packages-bctls: packages-bc
 	$(MELANGE) build packages/bctls-fips/melange.yaml \
 	    --arch x86_64,aarch64 \
 	    --signing-key $(SIGNING_KEY) \
-	    --out-dir $(PACKAGES_DIR)
-
-## ── Images ───────────────────────────────────────────────────────────────────
-
-## Build the FIPS-hardened Wolfi base OS image (no local packages needed)
-base: images/base/image.yaml
-	$(APKO) build $< $(BASE_REF) fips-base.tar
-
-## Build the FIPS-hardened Java 21 JRE image (requires `make packages` first)
-java21: packages images/java21/image.yaml
-	$(APKO) build images/java21/image.yaml \
-	    --repository-append "file://$(PACKAGES_DIR)" \
-	    --keyring-append "$(SIGNING_KEY).pub" \
-	    $(JAVA21_REF) fips-java21.tar
-
-## Load images into the local Docker daemon
-load-base: fips-base.tar
-	docker load < $<
-
-load-java21: fips-java21.tar
-	docker load < $<
+	    --out-dir $(PACKAGES_DIR) \
+	    --dependency-dir $(PACKAGES_DIR)
 
 ## ── Maintenance ──────────────────────────────────────────────────────────────
 
-## Remove image build artefacts
+## Remove build artefacts
 clean:
 	rm -f *.tar *.sbom.json
 
