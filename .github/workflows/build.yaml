@@ -65,12 +65,13 @@ jobs:
       - name: Restore stable signing key (push / tag)
         if: github.event_name != 'pull_request'
         run: |
+          if [ -z "${{ secrets.MELANGE_SIGNING_KEY }}" ]; then
+            echo "::error::MELANGE_SIGNING_KEY secret is not set"
+            exit 1
+          fi
           echo "${{ secrets.MELANGE_SIGNING_KEY }}" | base64 -d > /tmp/melange.rsa
           chmod 600 /tmp/melange.rsa
-          melange keygen --output /tmp/melange.rsa || true   # derive .pub if not stored
-          # Derive the public key from the private key
-          openssl rsa -in /tmp/melange.rsa -pubout -out /tmp/melange.rsa.pub 2>/dev/null || \
-            melange keygen /tmp/melange-scratch.rsa && cp /tmp/melange-scratch.rsa.pub /tmp/melange.rsa.pub || true
+          openssl pkey -in /tmp/melange.rsa -pubout -out /tmp/melange.rsa.pub
 
       # Build bouncycastle-fips first; its output dir becomes the dependency
       # repo for bctls-fips so the runtime dep can be resolved at build time.

@@ -1,98 +1,86 @@
-# FIPS Base Images
+# FIPS APK Packages
 
-Minimal, FIPS-hardened OCI container base images built with
-[apko](https://github.com/chainguard-dev/apko) and
-[Wolfi](https://github.com/wolfi-dev/os) open-source packages.
+[Melange](https://github.com/chainguard-dev/melange)-built APK packages for
+FIPS-validated BouncyCastle cryptographic libraries, published as a
+Wolfi-compatible APK repository via GitHub Pages.
 
-## Images
+## Packages
 
-| Image | Definition | Description |
-|---|---|---|
-| `fips-base` | `images/base/image.yaml` | Wolfi baseOS with OpenSSL FIPS provider + jitterentropy |
-| `fips-java21` | `images/java21/image.yaml` | Java 21 JRE on top of `fips-base` with BouncyCastle FIPS providers |
+| Package | Version | Description | CMVP |
+|---|---|---|---|
+| `bouncycastle-fips` | 2.1.2 | BC-FJA — FIPS 140-3 Level 1 JCA/JCE provider | [#4943](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943) |
+| `bctls-fips` | 2.1.22 | BCTLS-FJA — FIPS 140-3 JSSE provider for TLS 1.2/1.3 | — |
 
-Both images target `x86_64` and `aarch64`.
+Both packages are built for `x86_64` and `aarch64`.
+
+The JARs are fetched verbatim from Maven Central — they are **not recompiled**,
+so the CMVP validation remains intact.
+
+## Installation
+
+Packages are published to GitHub Pages as a standard APK repository. Add the
+repository and signing key to your apko image configuration:
+
+```yaml
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+    - https://<org>.github.io/<repo>
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    - https://<org>.github.io/<repo>/melange.rsa.pub
+  packages:
+    - bouncycastle-fips
+    - bctls-fips
+```
+
+Or install directly with `apk`:
+
+```bash
+# Add the repository and key
+echo "https://<org>.github.io/<repo>" >> /etc/apk/repositories
+wget -qO /etc/apk/keys/melange.rsa.pub https://<org>.github.io/<repo>/melange.rsa.pub
+
+apk add bouncycastle-fips bctls-fips
+```
+
+### Installed files
+
+| Package | Files |
+|---|---|
+| `bouncycastle-fips` | `/usr/share/java/bc-fips-2.1.2.jar` (+ symlink `bc-fips.jar`) |
+| `bctls-fips` | `/usr/share/java/bctls-fips-2.1.22.jar` (+ symlink `bctls-fips.jar`) |
 
 ## FIPS Architecture
 
 ### Kernel-Independent Design
 
-Both images include `jitterentropy-library`, a NIST SP 800-90B validated
-userspace entropy source. This decouples FIPS compliance from the host kernel —
-the images run on GKE (COS), AWS Bottlerocket, Azure Linux, and standard kernels
-without requiring a FIPS-mode kernel.
+`bouncycastle-fips` depends on `jitterentropy-library`, a NIST SP 800-90B
+validated userspace entropy source. The BC-RNG-JENT entropy provider seeds its
+SHA-256 DRBG from `jitterentropy-library`, so FIPS operation is fully
+kernel-independent — no FIPS-mode kernel required on the host.
 
-### Base image (`fips-base`)
+This means the packages work on GKE (COS), AWS Bottlerocket, Azure Linux, and
+standard kernels without any special kernel configuration.
 
-| Package | Role |
-|---|---|
-| `openssl` | OpenSSL 3.4+ with built-in FIPS provider module (CMVP [#4282](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4282)) |
-| `jitterentropy-library` | SP 800-90B userspace entropy source |
-| `ca-certificates-bundle` | Trusted TLS root certificates |
-| `wolfi-base` | BusyBox + musl libc minimal userspace |
+## Local Development
 
-### Java 21 image (`fips-java21`)
-
-Uses a fully Java-native FIPS stack — no PKCS11 bridge required.
-
-| Package | Role |
-|---|---|
-| `bouncycastle-fips` | BC-FJA 2.1.2 — JCA/JCE provider (CMVP [#4943](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943)) |
-| `bctls-fips` | BCTLS-FJA 2.1.22 — JSSE provider for FIPS TLS 1.2/1.3 |
-| `openjdk-21-jre` | OpenJDK 21 Java Runtime Environment |
-| `openjdk-21-default-jvm` | Sets OpenJDK 21 as the default JVM |
-| *(all base packages)* | OpenSSL FIPS + jitterentropy, as above |
-
-`bouncycastle-fips` uses its built-in **BC-RNG-JENT** entropy provider, which
-seeds the SHA-256 DRBG from `jitterentropy-library`. FIPS operation is
-therefore fully kernel-independent at the Java layer too.
-
-Security provider configuration is in `images/java21/fips.security`.
-
-## Local Packages (melange)
-
-`bouncycastle-fips` and `bctls-fips` are not in the public Wolfi repository.
-This repo packages the official FIPS-validated JARs from Maven Central using
-[melange](https://github.com/chainguard-dev/melange), Chainguard's APK builder.
-
-```
-packages/
-  bouncycastle-fips/melange.yaml   # bc-fips-2.1.2.jar  (CMVP #4943)
-  bctls-fips/melange.yaml          # bctls-fips-2.1.22.jar
-```
-
-The JARs are fetched verbatim from Maven Central — they are **not recompiled**,
-so the CMVP validation remains intact.
-
-## Prerequisites
+### Prerequisites
 
 ```bash
-# apko — OCI image builder
-brew install apko
-# or: go install chainguard.dev/apko@latest
-
-# melange — APK package builder (required for java21 image only)
+# melange — APK package builder
 brew install melange
 # or: go install chainguard.dev/melange@latest
 ```
 
-## Building
+### Building
 
 ```bash
 # Generate a local APK signing key (run once)
 make keys
 
-# Build everything: local packages + both images
-make all
-
-# Or build individually:
-make base       # no melange needed
-make packages   # build bouncycastle-fips + bctls-fips APKs
-make java21     # depends on `make packages`
-
-# Load into local Docker daemon
-make load-base
-make load-java21
+# Build bouncycastle-fips + bctls-fips APKs
+make packages
 
 # Clean build artefacts (keeps signing keys)
 make clean
@@ -101,39 +89,32 @@ make clean
 make clean-packages
 ```
 
-## Activating FIPS in Java Applications
+## CI/CD
 
-The image sets `CLASSPATH` to include the BC FIPS JARs automatically.
-Apply the security properties override at startup:
+The GitHub Actions workflow (`.github/workflows/build.yaml`) runs on every push
+to `main` and on version tags (`v*`):
+
+1. Builds both packages for x86_64 and aarch64 using melange
+2. On PRs: uploads packages as workflow artifacts for inspection
+3. On push/tag: deploys the APK repository to GitHub Pages
+
+### Repository secret
+
+The `MELANGE_SIGNING_KEY` repository secret must contain the base64-encoded
+melange RSA private key used to sign published packages:
 
 ```bash
-# Via environment variable (recommended for containers)
-docker run --rm \
-  -e JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security" \
-  fips-java21:latest java -version
-
-# Or inline
-docker run --rm fips-java21:latest \
-  java -Djava.security.properties=/etc/java/fips.security -jar myapp.jar
+# Generate a key locally, then base64-encode it for the secret
+melange keygen melange.rsa
+base64 -w0 melange.rsa  # paste this value into the repository secret
 ```
 
-The `fips.security` file configures:
-- `BouncyCastleFipsProvider` as the primary JCA/JCE provider (DRBG seeded via JENT)
-- `BouncyCastleJsseProvider` for FIPS TLS 1.2/1.3
-- TLS 1.0/1.1, RC4, DES, 3DES, MD5, and sub-2048-bit keys disabled
+## Repository layout
 
-## Verifying FIPS
-
-```bash
-# Base image: MD5 must be blocked
-docker run --rm fips-base:latest sh -c \
-  'openssl md5 /dev/null 2>&1 && echo "FAIL" || echo "OK: MD5 blocked"'
-
-# Base image: show loaded providers (should include fips)
-docker run --rm fips-base:latest openssl list -providers
-
-# Java image: confirm BouncyCastle FIPS providers are active
-docker run --rm \
-  -e JAVA_TOOL_OPTIONS="-Djava.security.properties=/etc/java/fips.security" \
-  fips-java21:latest java -XshowSettings:security -version 2>&1 | grep -i bouncy
+```
+packages/
+  bouncycastle-fips/melange.yaml   # BC-FJA 2.1.2  (CMVP #4943)
+  bctls-fips/melange.yaml          # BCTLS-FJA 2.1.22
+.github/workflows/build.yaml      # CI/CD pipeline
+Makefile                           # Local build targets
 ```
