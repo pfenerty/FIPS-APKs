@@ -233,7 +233,7 @@ jobs:
         run: cp /tmp/compliance-report/compliance-report.html /tmp/pages-content/compliance-report.html
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v4
         with:
           path: /tmp/pages-content/
 
