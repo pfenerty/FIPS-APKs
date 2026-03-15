@@ -120,7 +120,7 @@ jobs:
 
       # Upload packages for the fips-compliance job (all events).
       - name: Upload packages for compliance testing
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apk-packages-test
           path: /tmp/apk-packages/
@@ -129,7 +129,7 @@ jobs:
       # push/tag only: upload packages for the deploy-pages job.
       - name: Upload packages for Pages deployment (push / tag)
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apk-packages-pages
           path: /tmp/apk-packages/
@@ -138,7 +138,7 @@ jobs:
       # PRs: also upload as the plain "apk-packages" artifact for inspection.
       - name: Upload packages artifact (PR)
         if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: apk-packages
           path: /tmp/apk-packages/
@@ -189,7 +189,7 @@ jobs:
       # Always upload the report so it is available for inspection even on failure
       - name: Upload compliance report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fips-compliance-report
           path: /tmp/fips-report/
