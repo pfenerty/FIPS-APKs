@@ -62,7 +62,7 @@ jobs:
   build-packages:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: chainguard-dev/actions/setup-melange@main
 
@@ -148,7 +148,7 @@ jobs:
     needs: build-packages
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download built packages
         uses: actions/download-artifact@v4
