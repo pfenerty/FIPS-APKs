@@ -22,12 +22,13 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * FIPS compliance test suite for bouncycastle-fips and bctls-fips APK packages.
+ * FIPS compliance test suite for the bouncycastle-fips, bcutil-fips and
+ * bctls-fips APK packages.
  *
  * Compiled and run with plain javac/java against the installed JARs:
- *   javac --release 11 -cp /usr/share/java/bc-fips.jar:/usr/share/java/bctls-fips.jar \
+ *   javac --release 11 -cp /usr/share/java/bc-fips.jar:/usr/share/java/bcutil-fips.jar:/usr/share/java/bctls-fips.jar \
  *         FipsComplianceTest.java -d /tmp/fips-classes
- *   java  -cp "/tmp/fips-classes:/usr/share/java/bc-fips.jar:/usr/share/java/bctls-fips.jar" \
+ *   java  -cp "/tmp/fips-classes:/usr/share/java/bc-fips.jar:/usr/share/java/bcutil-fips.jar:/usr/share/java/bctls-fips.jar" \
  *         FipsComplianceTest
  *
  * Output lines prefixed "TEST_RESULT:" are parsed by run-fips-tests.sh to
@@ -40,15 +41,22 @@ public class FipsComplianceTest {
     // ── Artifact constants ─────────────────────────────────────────────────────
     // These must match the expected-sha256 values in:
     //   packages/bouncycastle-fips/melange.yaml
+    //   packages/bcutil-fips/melange.yaml
     //   packages/bctls-fips/melange.yaml
+    // tests/fips/check-pins.sh fails CI if they drift apart.
 
-    static final String BC_FIPS_JAR    = "/usr/share/java/bc-fips-2.1.2.jar";
-    static final String BCTLS_FIPS_JAR = "/usr/share/java/bctls-fips-2.1.22.jar";
-    static final String BC_FIPS_SYMLINK    = "/usr/share/java/bc-fips.jar";
-    static final String BCTLS_FIPS_SYMLINK = "/usr/share/java/bctls-fips.jar";
+    static final String BC_FIPS_JAR     = "/usr/share/java/bc-fips-2.1.1.jar";
+    static final String BCUTIL_FIPS_JAR = "/usr/share/java/bcutil-fips-2.1.5.jar";
+    static final String BCTLS_FIPS_JAR  = "/usr/share/java/bctls-fips-2.1.22.jar";
 
-    // CMVP #4943: https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943
-    static final String BC_FIPS_SHA256  = "044fcd8a29d236edea8a5b414406cdae63b475f9ad9f05fe2dc904a277941115";
+    static final String BC_FIPS_SYMLINK     = "/usr/share/java/bc-fips.jar";
+    static final String BCUTIL_FIPS_SYMLINK = "/usr/share/java/bcutil-fips.jar";
+    static final String BCTLS_FIPS_SYMLINK  = "/usr/share/java/bctls-fips.jar";
+
+    // bc-fips 2.1.1 is the software version listed on CMVP #4943:
+    // https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943
+    static final String BC_FIPS_SHA256  = "a430d935ad6cec6d045930758457740f5a5f8f9715894e347f6800f7926a7321";
+    static final String BCUTIL_SHA256   = "503aaf5c2c5b7c729547462efe13699b5f6dacf9be150b7c48bba974b793dc92";
     static final String BCTLS_SHA256    = "688410563445e1a65ff33cb67842499f0788994d752c3df8f7ea4a0d40ddbf50";
 
     // SHA-256("BouncyCastle FIPS") — used as a deterministic self-check for testSha256
@@ -110,29 +118,30 @@ public class FipsComplianceTest {
     // ── Test: JAR integrity ───────────────────────────────────────────────────
 
     /**
-     * Verifies that the installed JARs are bit-for-bit identical to the
-     * CMVP-certified artifacts by comparing SHA-256 digests.
+     * Verifies that all three installed JARs are bit-for-bit identical to the
+     * artifacts published on Maven Central by comparing SHA-256 digests. For
+     * bc-fips that artifact is the module covered by CMVP #4943.
      * Uses the SUN provider explicitly so this test is independent of
      * BC-FIPS initialization state.
      */
     static TestResult testJarIntegrity() {
+        String[][] artifacts = {
+            {"bc-fips",     BC_FIPS_JAR,     BC_FIPS_SHA256},
+            {"bcutil-fips", BCUTIL_FIPS_JAR, BCUTIL_SHA256},
+            {"bctls-fips",  BCTLS_FIPS_JAR,  BCTLS_SHA256},
+        };
+        StringBuilder detail = new StringBuilder();
         try {
-            String actualBcFips = sha256File(BC_FIPS_JAR);
-            String actualBctls  = sha256File(BCTLS_FIPS_JAR);
-
-            if (!BC_FIPS_SHA256.equals(actualBcFips)) {
-                return new TestResult("testJarIntegrity", false,
-                    "bc-fips SHA-256 MISMATCH: expected=" + BC_FIPS_SHA256
-                    + " got=" + actualBcFips);
+            for (String[] a : artifacts) {
+                String actual = sha256File(a[1]);
+                if (!a[2].equals(actual)) {
+                    return new TestResult("testJarIntegrity", false,
+                        a[0] + " SHA-256 MISMATCH: expected=" + a[2] + " got=" + actual);
+                }
+                if (detail.length() > 0) detail.append("  ");
+                detail.append(a[0]).append('=').append(actual, 0, 16).append("...");
             }
-            if (!BCTLS_SHA256.equals(actualBctls)) {
-                return new TestResult("testJarIntegrity", false,
-                    "bctls-fips SHA-256 MISMATCH: expected=" + BCTLS_SHA256
-                    + " got=" + actualBctls);
-            }
-            return new TestResult("testJarIntegrity", true,
-                "bc-fips=" + actualBcFips.substring(0, 16) + "...  "
-                + "bctls-fips=" + actualBctls.substring(0, 16) + "...");
+            return new TestResult("testJarIntegrity", true, detail.toString());
         } catch (Exception e) {
             return new TestResult("testJarIntegrity", false, e.getMessage());
         }
@@ -348,37 +357,33 @@ public class FipsComplianceTest {
     // ── Test: symlink resolution ──────────────────────────────────────────────
 
     /**
-     * Verifies that the unversioned symlinks installed by the APKs
-     * (bc-fips.jar, bctls-fips.jar) resolve to their versioned targets.
+     * Verifies that every unversioned symlink installed by the APKs
+     * (bc-fips.jar, bcutil-fips.jar, bctls-fips.jar) resolves to its
+     * versioned target.
      */
     static TestResult testSymlinkResolution() {
+        String[][] links = {
+            {BC_FIPS_SYMLINK,     "bc-fips-2.1.1.jar"},
+            {BCUTIL_FIPS_SYMLINK, "bcutil-fips-2.1.5.jar"},
+            {BCTLS_FIPS_SYMLINK,  "bctls-fips-2.1.22.jar"},
+        };
+        StringBuilder detail = new StringBuilder();
         try {
-            File bcFipsLink    = new File(BC_FIPS_SYMLINK);
-            File bctlsFipsLink = new File(BCTLS_FIPS_SYMLINK);
-
-            if (!bcFipsLink.exists()) {
-                return new TestResult("testSymlinkResolution", false,
-                    BC_FIPS_SYMLINK + " does not exist or symlink is broken");
+            for (String[] l : links) {
+                File link = new File(l[0]);
+                if (!link.exists()) {
+                    return new TestResult("testSymlinkResolution", false,
+                        l[0] + " does not exist or symlink is broken");
+                }
+                String canon = link.getCanonicalPath();
+                if (!canon.endsWith(l[1])) {
+                    return new TestResult("testSymlinkResolution", false,
+                        l[0] + " -> " + canon + " (expected to end with " + l[1] + ")");
+                }
+                if (detail.length() > 0) detail.append("  ");
+                detail.append(l[0]).append(" -> ").append(canon);
             }
-            if (!bctlsFipsLink.exists()) {
-                return new TestResult("testSymlinkResolution", false,
-                    BCTLS_FIPS_SYMLINK + " does not exist or symlink is broken");
-            }
-
-            String bcCanon    = bcFipsLink.getCanonicalPath();
-            String bctlsCanon = bctlsFipsLink.getCanonicalPath();
-
-            if (!bcCanon.endsWith("bc-fips-2.1.2.jar")) {
-                return new TestResult("testSymlinkResolution", false,
-                    "bc-fips.jar -> " + bcCanon + " (expected to end with bc-fips-2.1.2.jar)");
-            }
-            if (!bctlsCanon.endsWith("bctls-fips-2.1.22.jar")) {
-                return new TestResult("testSymlinkResolution", false,
-                    "bctls-fips.jar -> " + bctlsCanon + " (expected to end with bctls-fips-2.1.22.jar)");
-            }
-
-            return new TestResult("testSymlinkResolution", true,
-                "bc-fips.jar -> " + bcCanon + "  bctls-fips.jar -> " + bctlsCanon);
+            return new TestResult("testSymlinkResolution", true, detail.toString());
         } catch (Exception e) {
             return new TestResult("testSymlinkResolution", false, e.getMessage());
         }

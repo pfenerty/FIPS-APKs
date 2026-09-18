@@ -1,8 +1,8 @@
 #!/bin/sh
 # run-fips-tests.sh — compile, run, and report on FipsComplianceTest
 #
-# Runs inside a Wolfi container where bouncycastle-fips and bctls-fips
-# are already installed via apk.
+# Runs inside a Wolfi container where bouncycastle-fips, bcutil-fips and
+# bctls-fips are already installed via apk.
 #
 # Environment variables (set by GitHub Actions step):
 #   REPORT_DIR        - output directory for report files (default: /tmp/fips-report)
@@ -34,11 +34,12 @@ mkdir -p "$REPORT_DIR" "$CLASSES_DIR"
 
 TIMESTAMP="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 ARCH="$(uname -m)"
-JAVA_VERSION="$(java -version 2>&1 | head -1)"
+JAVA_VERSION="$(java -version 2>&1 | grep -i 'version' | head -1)"
 
 # ── Collect package metadata ───────────────────────────────────────────────────
 
 APK_BC_INFO="$(apk info -a bouncycastle-fips 2>/dev/null || echo 'not installed')"
+APK_BCUTIL_INFO="$(apk info -a bcutil-fips 2>/dev/null || echo 'not installed')"
 APK_BCTLS_INFO="$(apk info -a bctls-fips 2>/dev/null || echo 'not installed')"
 
 # ── Compile ────────────────────────────────────────────────────────────────────
@@ -143,15 +144,17 @@ cat >"${REPORT_DIR}/compliance-report.md" <<MARKDOWN
 
 ## CMVP Certificate References
 
-These packages distribute JARs that are validated by NIST under the
-Cryptographic Module Validation Program (CMVP). The JARs are fetched
-verbatim from Maven Central and never recompiled, preserving the
-certification boundary.
+\`bouncycastle-fips\` distributes BC-FJA 2.1.1, the software version listed on
+NIST CMVP certificate #4943. \`bcutil-fips\` and \`bctls-fips\` are supporting
+libraries outside the validated cryptographic boundary. All JARs are fetched
+verbatim from Maven Central and never recompiled, preserving the certification
+boundary.
 
 | Module | Version | CMVP Certificate | NIST URL |
 |---|---|---|---|
-| BC-FJA (bouncycastle-fips) | 2.1.2 | #4943 | https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943 |
-| BCTLS-FJA (bctls-fips) | 2.1.22 | depends on #4943 | https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943 |
+| BC-FJA (bouncycastle-fips) | 2.1.1 | #4943 | https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943 |
+| bcutil-fips | 2.1.5 | not a validated module | — |
+| BCTLS-FJA (bctls-fips) | 2.1.22 | not a validated module | — |
 
 ---
 
@@ -159,11 +162,13 @@ certification boundary.
 
 SHA-256 digests of the installed JARs are compared against the values
 recorded at build time (from the upstream \`.sha256\` files on Maven Central)
-to confirm the packaged artifacts are identical to the CMVP-validated binaries.
+to confirm the packaged artifacts are identical to the upstream binaries —
+for \`bc-fips\`, to the CMVP-validated module.
 
 | Artifact | Expected SHA-256 | Status |
 |---|---|---|
-| bc-fips-2.1.2.jar | \`044fcd8a29d236edea8a5b414406cdae63b475f9ad9f05fe2dc904a277941115\` | see test results below |
+| bc-fips-2.1.1.jar | \`a430d935ad6cec6d045930758457740f5a5f8f9715894e347f6800f7926a7321\` | see test results below |
+| bcutil-fips-2.1.5.jar | \`503aaf5c2c5b7c729547462efe13699b5f6dacf9be150b7c48bba974b793dc92\` | see test results below |
 | bctls-fips-2.1.22.jar | \`688410563445e1a65ff33cb67842499f0788994d752c3df8f7ea4a0d40ddbf50\` | see test results below |
 
 ---
@@ -246,26 +251,33 @@ cat >"${REPORT_DIR}/compliance-report.html" <<HTML
   </table>
 
   <h2>CMVP Certificate References</h2>
-  <p>These packages distribute JARs validated by NIST under the
-  Cryptographic Module Validation Program (CMVP). The JARs are fetched
-  verbatim from Maven Central and never recompiled, preserving the
+  <p><code>bouncycastle-fips</code> distributes BC-FJA 2.1.1, the software
+  version listed on NIST CMVP certificate #4943. <code>bcutil-fips</code> and
+  <code>bctls-fips</code> are supporting libraries outside the validated
+  cryptographic boundary and carry no certificate of their own. All JARs are
+  fetched verbatim from Maven Central and never recompiled, preserving the
   certification boundary.</p>
   <table>
     <thead><tr><th>Module</th><th>Version</th><th>Certificate</th><th>NIST URL</th></tr></thead>
     <tbody>
       <tr>
         <td>BC-FJA (<code>bouncycastle-fips</code>)</td>
-        <td>2.1.2</td>
+        <td>2.1.1</td>
         <td>#4943</td>
         <td><a href="https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943"
                target="_blank">CMVP #4943</a></td>
       </tr>
       <tr>
+        <td><code>bcutil-fips</code></td>
+        <td>2.1.5</td>
+        <td>not a validated module</td>
+        <td>&mdash;</td>
+      </tr>
+      <tr>
         <td>BCTLS-FJA (<code>bctls-fips</code>)</td>
         <td>2.1.22</td>
-        <td>depends on #4943</td>
-        <td><a href="https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943"
-               target="_blank">CMVP #4943</a></td>
+        <td>not a validated module</td>
+        <td>&mdash;</td>
       </tr>
     </tbody>
   </table>
@@ -273,13 +285,18 @@ cat >"${REPORT_DIR}/compliance-report.html" <<HTML
   <h2>Artifact Integrity</h2>
   <p>SHA-256 digests of installed JARs compared against values recorded
   at build time (from Maven Central upstream) to confirm the packaged
-  artifacts are identical to the CMVP-validated binaries.</p>
+  artifacts are identical to the upstream binaries &mdash; for
+  <code>bc-fips</code>, to the CMVP-validated module.</p>
   <table>
     <thead><tr><th>Artifact</th><th>Expected SHA-256</th></tr></thead>
     <tbody>
       <tr>
-        <td><code>bc-fips-2.1.2.jar</code></td>
-        <td><code>044fcd8a29d236edea8a5b414406cdae63b475f9ad9f05fe2dc904a277941115</code></td>
+        <td><code>bc-fips-2.1.1.jar</code></td>
+        <td><code>a430d935ad6cec6d045930758457740f5a5f8f9715894e347f6800f7926a7321</code></td>
+      </tr>
+      <tr>
+        <td><code>bcutil-fips-2.1.5.jar</code></td>
+        <td><code>503aaf5c2c5b7c729547462efe13699b5f6dacf9be150b7c48bba974b793dc92</code></td>
       </tr>
       <tr>
         <td><code>bctls-fips-2.1.22.jar</code></td>
@@ -302,6 +319,9 @@ cat >"${REPORT_DIR}/compliance-report.html" <<HTML
 
   <h3><code>bouncycastle-fips</code></h3>
   <pre>${APK_BC_INFO}</pre>
+
+  <h3><code>bcutil-fips</code></h3>
+  <pre>${APK_BCUTIL_INFO}</pre>
 
   <h3><code>bctls-fips</code></h3>
   <pre>${APK_BCTLS_INFO}</pre>

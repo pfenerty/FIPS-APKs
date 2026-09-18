@@ -1,17 +1,12 @@
 package:
   name: bouncycastle-fips
-  version: 2.1.2
+  version: 2.1.1
   epoch: 0
-  description: "BouncyCastle FIPS Java API (BC-FJA 2.1.2) — FIPS 140-3 Level 1 JCA/JCE provider (CMVP #4943)"
+  description: "BouncyCastle FIPS Java API (BC-FJA 2.1.1) — FIPS 140-3 Level 1 JCA/JCE provider (CMVP #4943)"
   copyright:
     - license: MIT
       paths:
         - usr/share/java/*
-
-  dependencies:
-    runtime:
-      # jitterentropy shared library is loaded at runtime by BC-RNG-JENT
-      - jitterentropy-library
 
 environment:
   contents:
@@ -24,17 +19,25 @@ environment:
 
 pipeline:
   # Download the FIPS-validated JAR from Maven Central.
+  #
+  # 2.1.1 is the software version listed on CMVP certificate #4943:
+  #   https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943
+  # Do not bump this to a newer bc-fips release without first confirming the
+  # new version appears on an active CMVP certificate — later releases are not
+  # covered by #4943 and bumping would void the certification claim this
+  # package exists to make.
+  #
   # SHA-256 matches the .sha256 file published at:
-  #   https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.2/bc-fips-2.1.2.jar.sha256
+  #   https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.1/bc-fips-2.1.1.jar.sha256
   - uses: fetch
     with:
-      uri: https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.2/bc-fips-2.1.2.jar
-      expected-sha256: 044fcd8a29d236edea8a5b414406cdae63b475f9ad9f05fe2dc904a277941115
+      uri: https://repo1.maven.org/maven2/org/bouncycastle/bc-fips/2.1.1/bc-fips-2.1.1.jar
+      expected-sha256: a430d935ad6cec6d045930758457740f5a5f8f9715894e347f6800f7926a7321
       extract: false
 
   - runs: |
-      install -Dm644 bc-fips-2.1.2.jar \
-        "${{targets.destdir}}/usr/share/java/bc-fips-2.1.2.jar"
+      install -Dm644 bc-fips-2.1.1.jar \
+        "${{targets.destdir}}/usr/share/java/bc-fips-2.1.1.jar"
       # Stable unversioned symlink for use in CLASSPATH / --module-path
-      ln -sf bc-fips-2.1.2.jar \
+      ln -sf bc-fips-2.1.1.jar \
         "${{targets.destdir}}/usr/share/java/bc-fips.jar"
