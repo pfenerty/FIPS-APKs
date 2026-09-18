@@ -1,0 +1,55 @@
+package:
+  name: fips-verify
+  version: 1.0.0
+  epoch: 0
+  description: "Reports whether a JVM is operating the BouncyCastle FIPS module in approved mode"
+  copyright:
+    - license: Apache-2.0
+      paths:
+        - usr/share/java/*
+        - usr/bin/*
+
+  dependencies:
+    runtime:
+      - bouncycastle-fips
+      - bcutil-fips
+      - bctls-fips
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - wolfi-base
+      - openjdk-21-default-jdk
+      - bouncycastle-fips
+      - bcutil-fips
+      - bctls-fips
+
+pipeline:
+  # --release 11 so the tool runs on any JRE the consumer's image ships,
+  # not just the JDK it was built with.
+  - runs: |
+      CP=/usr/share/java/bc-fips.jar:/usr/share/java/bcutil-fips.jar:/usr/share/java/bctls-fips.jar
+      mkdir -p /tmp/fv-classes
+      javac --release 11 -cp "$CP" tools/fips-verify/FipsVerify.java -d /tmp/fv-classes
+      jar cfe /tmp/fips-verify.jar FipsVerify -C /tmp/fv-classes .
+      install -Dm644 /tmp/fips-verify.jar \
+        "${{targets.destdir}}/usr/share/java/fips-verify.jar"
+
+  # The wrapper deliberately sets NO JVM flags. Its job is to report the
+  # configuration this image and application actually have, so it must inherit
+  # JAVA_TOOL_OPTIONS rather than impose its own -- a wrapper that forced
+  # approved mode would only ever verify itself.
+  - runs: |
+      mkdir -p "${{targets.destdir}}/usr/bin"
+      cat > "${{targets.destdir}}/usr/bin/fips-verify" <<'EOF'
+      #!/bin/sh
+      # fips-verify -- report this JVM's BC-FIPS approved-mode status.
+      # Inherits JAVA_TOOL_OPTIONS on purpose; do not add -D flags here.
+      exec java -cp "/usr/share/java/fips-verify.jar:/usr/share/java/bc-fips.jar:/usr/share/java/bcutil-fips.jar:/usr/share/java/bctls-fips.jar" \
+          FipsVerify "$@"
+      EOF
+      chmod 755 "${{targets.destdir}}/usr/bin/fips-verify"

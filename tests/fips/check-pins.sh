@@ -22,14 +22,23 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
 # Files that repeat versions and/or digests and must track melange.yaml.
-DEPENDENT_FILES="tests/fips/FipsComplianceTest.java tests/fips/run-fips-tests.sh tests/fips/COMPLIANCE.md README.md"
+DEPENDENT_FILES="tests/fips/FipsComplianceTest.java tools/fips-verify/FipsVerify.java tests/fips/run-fips-tests.sh tests/fips/COMPLIANCE.md README.md"
 
 # Files required to carry each package's digest verbatim.
-DIGEST_FILES="tests/fips/FipsComplianceTest.java tests/fips/run-fips-tests.sh tests/fips/COMPLIANCE.md"
+DIGEST_FILES="tests/fips/FipsComplianceTest.java tools/fips-verify/FipsVerify.java tests/fips/run-fips-tests.sh tests/fips/COMPLIANCE.md"
 
-# SHA-256 values that are legitimately not package digests.
-# deacb179... is SHA-256("BouncyCastle FIPS"), the known-answer test vector.
-ALLOWED_EXTRA_DIGESTS="deacb1797c79417204e8149f0db8d7cccbe19440b0ac4e2cb947c9b57128fe47"
+# 64-hex constants that are legitimately not package digests: published test
+# vectors and fixed keys. Listed individually so that a genuinely stale package
+# digest is still caught rather than waved through.
+#   deacb179... SHA-256("BouncyCastle FIPS")          tests/fips self-check
+#   ba7816bf... SHA-256("abc")                        FIPS 180-2
+#   b0344c61... HMAC-SHA-256 expected MAC             RFC 4231 test case 1
+#   00010203... AES-256 key                           FIPS 197 appendix C.3
+ALLOWED_EXTRA_DIGESTS="\
+deacb1797c79417204e8149f0db8d7cccbe19440b0ac4e2cb947c9b57128fe47 \
+ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad \
+b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7 \
+000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
 
 FAILURES=0
 KNOWN_DIGESTS="$ALLOWED_EXTRA_DIGESTS"
@@ -46,8 +55,20 @@ for cfg in packages/*/melange.yaml; do
     uri="$(sed -n 's/^ *uri: *//p' "$cfg" | head -1)"
     jarfile="$(basename "$uri")"
 
-    if [ -z "$name" ] || [ -z "$version" ] || [ -z "$sha" ] || [ -z "$uri" ]; then
-        fail "$cfg: could not parse name/version/expected-sha256/uri"
+    if [ -z "$name" ] || [ -z "$version" ]; then
+        fail "$cfg: could not parse package name/version"
+        continue
+    fi
+
+    # Packages that fetch nothing (configuration and tooling built from files
+    # already in this repository) pin no upstream artifact, so there is nothing
+    # here to keep in step. A half-declared fetch is still an error.
+    if [ -z "$uri" ] && [ -z "$sha" ]; then
+        echo "== $name $version (no upstream artifact; nothing to pin)"
+        continue
+    fi
+    if [ -z "$uri" ] || [ -z "$sha" ]; then
+        fail "$cfg: has one of uri/expected-sha256 but not both"
         continue
     fi
 

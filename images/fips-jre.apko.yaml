@@ -1,0 +1,60 @@
+# fips-jre -- a JRE base image with the BouncyCastle FIPS module installed and
+# configured for approved-mode operation.
+#
+# What this image gives you:
+#   * BC-FJA 2.1.1, the module listed on CMVP #4943, installed unmodified
+#   * approved-only mode enabled, and the JCA resolving to it by default
+#   * fips-verify on PATH to report that status from inside a deployment
+#
+# What it does NOT give you:
+#   * a validated entropy source. Seeding is from the host kernel; no SP 800-90B
+#     (ESV) claim is made. fips-verify reports the entropy chain explicitly.
+#   * FIPS compliance for your application. This image configures the module;
+#     your application still has to use it, and not use anything else.
+#
+# Verify a running container with:  docker run --rm <image> fips-verify
+
+contents:
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    - https://<org>.github.io/<repo>/melange.rsa.pub
+  repositories:
+    - https://packages.wolfi.dev/os
+    - https://<org>.github.io/<repo>
+  packages:
+    - wolfi-base
+    - openjdk-21-default-jvm
+    - bouncycastle-fips
+    - bcutil-fips
+    - bctls-fips
+    - bouncycastle-fips-config
+    - fips-verify
+
+# Both flags are required and neither is sufficient alone: approved_only
+# selects the mode, java.security makes BCFIPS the provider the JCA resolves
+# to. Without the second, BC falls back to the JVM default SecureRandom
+# (NativePRNG) and every implicit symmetric key generation fails.
+#
+# Set via JAVA_TOOL_OPTIONS rather than a wrapper script so that the
+# application, any child JVM, and fips-verify all inherit the same
+# configuration -- fips-verify then reports the real state rather than one it
+# imposed on itself.
+environment:
+  JAVA_TOOL_OPTIONS: "-Dorg.bouncycastle.fips.approved_only=true -Djava.security.properties=/usr/share/java/fips/fips.java.security"
+
+entrypoint:
+  command: /usr/bin/java
+
+archs:
+  - x86_64
+  - aarch64
+
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+  run-as: 65532

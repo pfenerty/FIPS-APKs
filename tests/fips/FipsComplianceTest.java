@@ -34,6 +34,11 @@ import java.util.List;
  * Output lines prefixed "TEST_RESULT:" are parsed by run-fips-tests.sh to
  * generate the compliance report.
  *
+ * Tests catch Throwable rather than Exception on purpose: BC-FIPS signals
+ * approved-mode violations with Errors (FipsUnapprovedOperationError), which
+ * a catch of Exception does not intercept -- they would terminate the JVM
+ * partway through the run instead of being reported as a failed test.
+ *
  * Exit code: 0 = all tests pass, 1 = one or more tests failed.
  */
 public class FipsComplianceTest {
@@ -88,7 +93,7 @@ public class FipsComplianceTest {
         try {
             BC_PROVIDER = new BouncyCastleFipsProvider();
             Security.addProvider(BC_PROVIDER);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             System.err.println("FATAL: failed to instantiate BouncyCastleFipsProvider: " + e.getMessage());
             System.exit(1);
         }
@@ -142,7 +147,7 @@ public class FipsComplianceTest {
                 detail.append(a[0]).append('=').append(actual, 0, 16).append("...");
             }
             return new TestResult("testJarIntegrity", true, detail.toString());
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testJarIntegrity", false, e.getMessage());
         }
     }
@@ -175,7 +180,7 @@ public class FipsComplianceTest {
                     "FipsStatus.isReady()=false: " + FipsStatus.getStatusMessage());
             }
             return new TestResult("testFipsSelfTests", true, "FipsStatus.isReady()=true");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testFipsSelfTests", false, e.getMessage());
         }
     }
@@ -191,7 +196,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testProviderRegistration", true,
                 "provider=" + p.getName() + " version=" + p.getVersionStr());
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testProviderRegistration", false, e.getMessage());
         }
     }
@@ -222,7 +227,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testAesGcm", true,
                 "AES-256-GCM encrypt/decrypt round-trip ok");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testAesGcm", false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
@@ -243,7 +248,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testSha256", true,
                 "SHA-256(\"" + KNOWN_SHA256_INPUT + "\")=" + actual.substring(0, 16) + "...");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testSha256", false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
@@ -273,7 +278,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testRsa", true,
                 "RSA-2048 SHA256withRSA sign/verify ok, sigLen=" + sig.length);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testRsa", false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
@@ -303,7 +308,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testEcdsa", true,
                 "ECDSA P-256 SHA256withECDSA sign/verify ok");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testEcdsa", false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
@@ -325,7 +330,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testHmacSha256", true,
                 "HmacSHA256 output=" + result.length + " bytes");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testHmacSha256", false, e.getClass().getSimpleName() + ": " + e.getMessage());
         }
     }
@@ -348,7 +353,7 @@ public class FipsComplianceTest {
             }
             return new TestResult("testTlsProvider", true,
                 "BCJSSE registered; TLSv1.3 SSLContext obtained");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testTlsProvider", false,
                 e.getClass().getSimpleName() + ": " + e.getMessage());
         }
@@ -384,7 +389,7 @@ public class FipsComplianceTest {
                 detail.append(l[0]).append(" -> ").append(canon);
             }
             return new TestResult("testSymlinkResolution", true, detail.toString());
-        } catch (Exception e) {
+        } catch (Throwable e) {
             return new TestResult("testSymlinkResolution", false, e.getMessage());
         }
     }

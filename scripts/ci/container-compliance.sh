@@ -25,7 +25,8 @@ echo "/apk-packages" >> /etc/apk/repositories
 apk update
 
 echo "=== Installing the packages under test ==="
-apk add --no-cache bouncycastle-fips bcutil-fips bctls-fips
+apk add --no-cache bouncycastle-fips bcutil-fips bctls-fips \
+    bouncycastle-fips-config fips-verify
 
 echo "=== Running the compliance suite ==="
 sh /repo/tests/fips/run-fips-tests.sh

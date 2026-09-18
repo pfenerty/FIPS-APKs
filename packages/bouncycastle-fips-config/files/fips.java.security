@@ -1,0 +1,50 @@
+# fips.java.security -- JCA configuration for FIPS-approved operation.
+#
+# Applied with:  -Djava.security.properties=/usr/share/java/fips/fips.java.security
+# (single '=' overrides these properties and leaves the rest of the JDK's
+# java.security intact; '==' would replace the file wholesale and is not what
+# this overlay expects)
+#
+# Must be combined with:  -Dorg.bouncycastle.fips.approved_only=true
+# Neither alone is sufficient: the property selects approved mode, this file
+# makes the approved provider the one the JCA actually resolves to.
+#
+# The BC jars carry no META-INF/services registration, so providers are named
+# by fully-qualified class name rather than by short name.
+
+# ---- Provider order -------------------------------------------------------
+# BCFIPS first so that JCA lookups without an explicit provider resolve to the
+# validated module rather than to SunJCE. The JDK providers are retained after
+# it: removing SUN breaks keystore loading, JVM SecureRandom and X.509 parsing,
+# and they cannot shadow BCFIPS from a lower position.
+security.provider.1=org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider
+security.provider.2=org.bouncycastle.jsse.provider.BouncyCastleJsseProvider
+security.provider.3=SUN
+security.provider.4=SunRsaSign
+security.provider.5=SunEC
+security.provider.6=SunJSSE
+security.provider.7=SunJCE
+security.provider.8=SunJGSS
+security.provider.9=SunSASL
+security.provider.10=XMLDSig
+security.provider.11=SunPCSC
+security.provider.12=JdkLDAP
+security.provider.13=JdkSASL
+security.provider.14=SunPKCS11
+
+# ---- TLS ------------------------------------------------------------------
+# PKIX rather than SunX509 so the BCJSSE key/trust managers are selected.
+ssl.KeyManagerFactory.algorithm=PKIX
+ssl.TrustManagerFactory.algorithm=PKIX
+
+# ---- SecureRandom ---------------------------------------------------------
+# SecureRandom.getInstanceStrong() resolves to the module's approved DRBG
+# instead of NativePRNGBlocking. Note this changes which DRBG is used; it does
+# NOT change where the seed comes from -- that remains the host kernel via
+# securerandom.source below, which this overlay deliberately leaves alone.
+securerandom.strongAlgorithms=DEFAULT:BCFIPS
+
+# ---- Deliberately NOT set -------------------------------------------------
+# keystore.type: left at the JDK default. BCFKS is the FIPS keystore format,
+# but forcing it here breaks every application that loads a JKS or PKCS12
+# store. Applications requiring an approved keystore should set it themselves.

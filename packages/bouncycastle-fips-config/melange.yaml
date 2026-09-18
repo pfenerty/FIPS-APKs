@@ -1,0 +1,34 @@
+package:
+  name: bouncycastle-fips-config
+  version: 1.0.0
+  epoch: 0
+  description: "JCA configuration for FIPS-approved operation of the BouncyCastle FIPS provider"
+  copyright:
+    - license: Apache-2.0
+      paths:
+        - usr/share/java/fips/*
+
+  dependencies:
+    runtime:
+      - bouncycastle-fips
+      - bcutil-fips
+      - bctls-fips
+
+environment:
+  contents:
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    repositories:
+      - https://packages.wolfi.dev/os
+    packages:
+      - wolfi-base
+
+# Installing this package does NOT by itself put a JVM into approved mode: the
+# overlay has to be selected with -Djava.security.properties, and approved mode
+# with -Dorg.bouncycastle.fips.approved_only=true. The apko image sets both via
+# JAVA_TOOL_OPTIONS so that the application and fips-verify inherit the same
+# configuration. Run fips-verify to confirm what a given JVM actually resolved.
+pipeline:
+  - runs: |
+      install -Dm644 packages/bouncycastle-fips-config/files/fips.java.security \
+        "${{targets.destdir}}/usr/share/java/fips/fips.java.security"

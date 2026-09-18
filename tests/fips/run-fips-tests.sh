@@ -61,6 +61,34 @@ cat "$OUTPUT_FILE"
 echo ""
 echo "Test exit code: $TEST_EXIT"
 
+# -- Approved-mode evidence -------------------------------------------------
+# The suite above runs in BC-FIPS default mode and attests to packaging
+# integrity. fips-verify runs the module in approved mode under the shipped
+# java.security overlay and attests to approved-mode operation. They answer
+# different questions, so the report carries both.
+
+VERIFY_FILE=/tmp/fips-verify.txt
+VERIFY_EXIT=0
+if command -v fips-verify >/dev/null 2>&1; then
+    echo ""
+    echo "=== Running fips-verify in approved mode ==="
+    JAVA_TOOL_OPTIONS="-Dorg.bouncycastle.fips.approved_only=true -Djava.security.properties=/usr/share/java/fips/fips.java.security" \
+        fips-verify >"$VERIFY_FILE" 2>&1 || VERIFY_EXIT=$?
+    # The JVM announces JAVA_TOOL_OPTIONS on stderr; keep it out of the report.
+    sed -i '/^Picked up JAVA_TOOL_OPTIONS/d' "$VERIFY_FILE" 2>/dev/null || true
+    cat "$VERIFY_FILE"
+    echo "fips-verify exit code: $VERIFY_EXIT"
+else
+    echo "fips-verify not installed; approved-mode evidence not collected." >"$VERIFY_FILE"
+    VERIFY_EXIT=127
+fi
+
+if [ "$VERIFY_EXIT" -eq 0 ]; then
+    VERIFY_SUMMARY="PASS -- module confirmed operating in FIPS-approved mode"
+else
+    VERIFY_SUMMARY="FAIL -- approved-mode verification did not pass (exit ${VERIFY_EXIT})"
+fi
+
 # ── Parse TEST_RESULT lines ────────────────────────────────────────────────────
 
 # Extract each "TEST_RESULT: PASS/FAIL  name  detail" line
@@ -180,6 +208,27 @@ ${PASS_COUNT} passed, ${FAIL_COUNT} failed (${TOTAL_COUNT} total).
 | Test | Status | Detail |
 |---|---|---|
 ${RESULT_ROWS}
+
+---
+
+## Approved-Mode Verification
+
+The test results above are produced in BC-FIPS **default mode** and attest to
+packaging integrity. This section is produced by \`fips-verify\` running the
+module in **approved-only mode** under the shipped \`java.security\` overlay,
+and attests to approved-mode operation.
+
+**${VERIFY_SUMMARY}**
+
+\`\`\`
+$(cat "$VERIFY_FILE")
+\`\`\`
+
+Reproduce this inside any image built from these packages:
+
+\`\`\`
+fips-verify
+\`\`\`
 
 ---
 
@@ -314,6 +363,17 @@ cat >"${REPORT_DIR}/compliance-report.html" <<HTML
       ${RESULT_ROWS_HTML}
     </tbody>
   </table>
+
+  <h2>Approved-Mode Verification</h2>
+  <p>The test results above are produced in BC-FIPS <em>default mode</em> and
+  attest to packaging integrity. This section is produced by
+  <code>fips-verify</code> running the module in <em>approved-only mode</em>
+  under the shipped <code>java.security</code> overlay, and attests to
+  approved-mode operation.</p>
+  <p><strong>${VERIFY_SUMMARY}</strong></p>
+  <pre>$(sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' "$VERIFY_FILE")</pre>
+  <p>Reproduce this inside any image built from these packages by running
+  <code>fips-verify</code>.</p>
 
   <h2>Package Metadata</h2>
 

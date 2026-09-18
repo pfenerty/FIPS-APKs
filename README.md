@@ -11,6 +11,8 @@ Wolfi-compatible APK repository via GitHub Pages.
 | `bouncycastle-fips` | 2.1.1 | BC-FJA — FIPS 140-3 Level 1 JCA/JCE provider | [#4943](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943) |
 | `bcutil-fips` | 2.1.5 | BouncyCastle FIPS utility library — ASN.1 and supporting utilities required by `bctls-fips` | — |
 | `bctls-fips` | 2.1.22 | BCTLS-FJA — FIPS 140-3 JSSE provider for TLS 1.2/1.3 | — |
+| `bouncycastle-fips-config` | 1.0.0 | `java.security` overlay that puts the JCA into approved-mode operation | — |
+| `fips-verify` | 1.0.0 | Reports whether a running JVM is in approved mode, with evidence | — |
 
 All packages are built for `x86_64` and `aarch64`.
 
@@ -23,6 +25,50 @@ covered by an active certificate; see
 [`tests/fips/COMPLIANCE.md`](tests/fips/COMPLIANCE.md) before bumping it.
 `bcutil-fips` and `bctls-fips` are supporting libraries outside the validated
 cryptographic boundary and carry no certificate of their own.
+
+## Approved-mode operation
+
+Installing the JARs does not by itself put an application into FIPS-approved
+mode. Two settings are required, and **neither is sufficient alone**:
+
+```
+-Dorg.bouncycastle.fips.approved_only=true
+-Djava.security.properties=/usr/share/java/fips/fips.java.security
+```
+
+The first selects approved mode; the second (from `bouncycastle-fips-config`)
+makes `BCFIPS` the first JCA provider. Ordering matters: BC-FIPS falls back to
+the JVM default `SecureRandom` when a caller does not supply one, and unless
+`BCFIPS` is first that default is `NativePRNG` — not an approved DRBG — so
+implicit symmetric key generation fails. With the overlay applied, no
+application code change is required.
+
+The `fips-jre` image (`images/fips-jre.apko.yaml`) sets both via
+`JAVA_TOOL_OPTIONS`. Confirm the result from inside any container:
+
+```bash
+$ fips-verify
+  RESULT: module is operating in FIPS-approved mode
+```
+
+`fips-verify` exits non-zero if the module is not in approved mode, so it can
+gate a deployment. `--json` emits the same evidence machine-readably.
+
+## What is and is not claimed
+
+| | Status |
+|---|---|
+| Cryptographic module | **CMVP #4943** (BC-FJA 2.1.1), installed unmodified, digest verified |
+| Approved-mode operation | **Verified** on every build and re-verifiable in any deployment |
+| Non-approved algorithms | **Demonstrated unavailable** (MD5, RC4, DES, MD5withRSA, RSA-1024) |
+| Algorithm correctness | **Published KATs** (FIPS 180-2, FIPS 197, RFC 4231, GCM spec) |
+| Entropy source | **Host kernel. No SP 800-90B / ESV claim.** |
+| `bcutil-fips`, `bctls-fips` | Outside the validated boundary; integrity-checked only |
+| Your application | Not covered. This configures the module; using it correctly is yours. |
+
+These packages **verify**; they do not **validate**. Validation is an assertion
+by an accredited laboratory. Everything above is a measurement you can
+reproduce by running `fips-verify` yourself.
 
 ## Installation
 
@@ -159,6 +205,10 @@ tests/
     run-fips-tests.sh              # Orchestration + report generation
     check-pins.sh                  # Version/digest drift check (runs first in CI)
     COMPLIANCE.md                  # Compliance testing documentation
+images/
+  fips-jre.apko.yaml               # JRE image, approved mode pre-configured
+tools/
+  fips-verify/FipsVerify.java      # Approved-mode verification tool
 scripts/
   ci/                              # Shell logic the CI workflow delegates to
     prepare-signing-key.sh         # Ephemeral (PR) or stable (push/tag) signing key
