@@ -67,12 +67,15 @@ drifted out of agreement with them.
 
 ### How it runs
 
-The `fips-compliance` CI job:
+The `fips-compliance` CI job delegates to `scripts/ci/run-compliance.sh`,
+which in turn runs `scripts/ci/container-compliance.sh` inside the container.
+Between them they:
 
-1. Downloads the APKs built by the `build-packages` job
-2. Starts a `cgr.dev/chainguard/wolfi-base` Docker container (same base as production)
-3. Installs `openjdk-21-default-jdk` for compilation and `bouncycastle-fips`,
-   `bcutil-fips`, `bctls-fips` from the local APK repository
+1. Download the APKs built by the `build-packages` job
+2. Start a `cgr.dev/chainguard/wolfi-base` Docker container (same base as production)
+3. Install `openjdk-21-default-jdk` for compilation and `bouncycastle-fips`,
+   `bcutil-fips`, `bctls-fips` from the local APK repository, verified against
+   the build signing key (nothing is installed with `--allow-untrusted`)
 4. Compiles `FipsComplianceTest.java` against the installed JARs
 5. Runs the compiled test and captures output
 6. Generates `compliance-report.md` and `compliance-report.html`

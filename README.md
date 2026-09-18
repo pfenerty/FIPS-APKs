@@ -131,6 +131,10 @@ to `main` and on pull requests:
 4. **`deploy-pages`** (push/tag only) — deploys the APK repository and compliance
    report to GitHub Pages
 
+CI shell logic lives in `scripts/ci/` rather than inline in the workflow, so
+it can be read, linted and run outside Actions. `build.yaml` holds the job
+graph and the `uses:` steps; each `run:` step delegates to a script.
+
 ### Repository secret
 
 The `MELANGE_SIGNING_KEY` repository secret must contain the base64-encoded
@@ -155,6 +159,12 @@ tests/
     run-fips-tests.sh              # Orchestration + report generation
     check-pins.sh                  # Version/digest drift check (runs first in CI)
     COMPLIANCE.md                  # Compliance testing documentation
-.github/workflows/build.yaml      # CI/CD pipeline
+scripts/
+  ci/                              # Shell logic the CI workflow delegates to
+    prepare-signing-key.sh         # Ephemeral (PR) or stable (push/tag) signing key
+    run-compliance.sh              # Starts the Wolfi test container
+    container-compliance.sh        # Runs inside that container
+    assert-compliance-passed.sh    # Turns the recorded outcome into a job result
+.github/workflows/build.yaml      # CI/CD pipeline (job graph; steps delegate)
 Makefile                           # Local build targets
 ```
