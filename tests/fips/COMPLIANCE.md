@@ -19,12 +19,20 @@ The tests exist to provide evidence that:
 
 | Module | Version | Certificate | NIST URL |
 |---|---|---|---|
-| BC-FJA (`bouncycastle-fips`) | 2.1.2 | #4943 | [CMVP #4943](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943) |
-| BCTLS-FJA (`bctls-fips`) | 2.1.22 | uses #4943 | [CMVP #4943](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943) |
+| BC-FJA (`bouncycastle-fips`) | 2.1.1 | #4943 | [CMVP #4943](https://csrc.nist.gov/projects/cryptographic-module-validation-program/certificate/4943) |
+| `bcutil-fips` | 2.1.5 | not a validated module | — |
+| BCTLS-FJA (`bctls-fips`) | 2.1.22 | not a validated module | — |
 
-BCTLS-FJA is a TLS layer built on top of BC-FJA. The FIPS cryptographic
-boundary is the BC-FJA module. Both JARs are fetched verbatim from Maven
-Central and never recompiled, preserving the certification boundary.
+**The pinned bc-fips version is load-bearing.** CMVP #4943 lists software
+version **2.1.1**. Later bc-fips releases (2.1.2 and up) are *not* covered by
+it, so bumping this package without checking the [CMVP active module
+list](https://csrc.nist.gov/projects/cryptographic-module-validation-program/validated-modules/search)
+would silently void the certification claim these packages exist to make.
+
+BCTLS-FJA is a TLS layer built on top of BC-FJA, and `bcutil-fips` supplies
+ASN.1 utilities it needs. Neither is a validated module in its own right — the
+FIPS cryptographic boundary is the BC-FJA module. All three JARs are fetched
+verbatim from Maven Central and never recompiled, preserving that boundary.
 
 ## Artifact Integrity
 
@@ -34,13 +42,18 @@ for the CMVP-certified artifacts.
 
 | Artifact | Expected SHA-256 |
 |---|---|
-| `bc-fips-2.1.2.jar` | `044fcd8a29d236edea8a5b414406cdae63b475f9ad9f05fe2dc904a277941115` |
+| `bc-fips-2.1.1.jar` | `a430d935ad6cec6d045930758457740f5a5f8f9715894e347f6800f7926a7321` |
 | `bcutil-fips-2.1.5.jar` | `503aaf5c2c5b7c729547462efe13699b5f6dacf9be150b7c48bba974b793dc92` |
 | `bctls-fips-2.1.22.jar` | `688410563445e1a65ff33cb67842499f0788994d752c3df8f7ea4a0d40ddbf50` |
 
-These values are also hardcoded as `expected-sha256` in the respective
+These values are hardcoded as `expected-sha256` in the respective
 `melange.yaml` files so Melange verifies them at APK build time, and again
 by `FipsComplianceTest.java` at runtime against the installed files.
+
+The `melange.yaml` files are the single source of truth for versions and
+digests. `check-pins.sh` runs first in CI and fails the build if any other
+file — the Java test, the report templates, this document, the README — has
+drifted out of agreement with them.
 
 ## Test Suite
 
@@ -50,15 +63,19 @@ by `FipsComplianceTest.java` at runtime against the installed files.
 |---|---|
 | `FipsComplianceTest.java` | Java test program; compiled and run against the installed JARs |
 | `run-fips-tests.sh` | Shell orchestrator; installs packages, drives compilation and execution, generates the compliance report |
+| `check-pins.sh` | Version/digest consistency check; runs in its own CI job before anything is built |
 
 ### How it runs
 
-The `fips-compliance` CI job:
+The `fips-compliance` CI job delegates to `scripts/ci/run-compliance.sh`,
+which in turn runs `scripts/ci/container-compliance.sh` inside the container.
+Between them they:
 
-1. Downloads the APKs built by the `build-packages` job
-2. Starts a `cgr.dev/chainguard/wolfi-base` Docker container (same base as production)
-3. Installs `openjdk-21-default-jdk` for compilation and `bouncycastle-fips`,
-   `bcutil-fips`, `bctls-fips` from the local APK repository
+1. Download the APKs built by the `build-packages` job
+2. Start a `cgr.dev/chainguard/wolfi-base` Docker container (same base as production)
+3. Install `openjdk-21-default-jdk` for compilation and `bouncycastle-fips`,
+   `bcutil-fips`, `bctls-fips` from the local APK repository, verified against
+   the build signing key (nothing is installed with `--allow-untrusted`)
 4. Compiles `FipsComplianceTest.java` against the installed JARs
 5. Runs the compiled test and captures output
 6. Generates `compliance-report.md` and `compliance-report.html`
@@ -69,7 +86,7 @@ The `fips-compliance` CI job:
 
 | Test | Description |
 |---|---|
-| `testJarIntegrity` | Computes SHA-256 of the installed versioned JARs using the JDK `SUN` provider (before BC-FIPS is registered) and compares against the expected digests above. A mismatch means the packaged JAR differs from the CMVP artifact. |
+| `testJarIntegrity` | Computes SHA-256 of all three installed versioned JARs using the JDK `SUN` provider (before BC-FIPS is registered) and compares against the expected digests above. A mismatch means the packaged JAR differs from the upstream artifact — for `bc-fips`, from the CMVP-validated module. |
 | `testFipsSelfTests` | Checks `FipsStatus.isReady()` after `BouncyCastleFipsProvider` construction. BC-FIPS runs its Power-On Self-Tests (algorithm known-answer tests and integrity checks) during initialization; `isReady()` returns `false` if any POST failed. |
 | `testProviderRegistration` | Verifies that `Security.getProvider("BCFIPS")` returns a non-null provider after registration, confirming the JCA service lookup works correctly. |
 | `testAesGcm` | Generates an AES-256 key via `BCFIPS`, encrypts 20 bytes with AES-256-GCM, decrypts, and checks the round-trip produces the original plaintext. |
@@ -78,16 +95,28 @@ The `fips-compliance` CI job:
 | `testEcdsa` | Generates a P-256 key pair, signs a byte array with `SHA256withECDSA`, and verifies the signature — all via `BCFIPS`. |
 | `testHmacSha256` | Generates an HMAC-SHA256 key, computes a MAC over a test string, and checks the output is the expected 32 bytes. |
 | `testTlsProvider` | Registers `BouncyCastleJsseProvider` (from `bctls-fips`) backed by the already-registered `BCFIPS` provider, then obtains a `TLSv1.3` `SSLContext` from `BCJSSE`. |
-| `testSymlinkResolution` | Checks that the unversioned symlinks (`/usr/share/java/bc-fips.jar`, `/usr/share/java/bctls-fips.jar`) exist and resolve to their versioned targets. |
+| `testSymlinkResolution` | Checks that all three unversioned symlinks (`/usr/share/java/bc-fips.jar`, `bcutil-fips.jar`, `bctls-fips.jar`) exist and resolve to their versioned targets. |
 
 ### What is not tested
 
-**Algorithm rejection in approved-only mode.** BC-FIPS only blocks non-approved
-algorithms (RC4, DES, MD5withRSA, etc.) when explicitly initialized in
-approved-only mode via the `org.bouncycastle.fips.approved_only=true` system
-property. In the default mode used here, the library runs POST self-tests and
-makes approved algorithms available but does not restrict non-approved ones.
-Testing this behavior is outside the scope of APK packaging compliance.
+**FIPS approved-only operation.** This is the most significant gap, and it is
+deliberate for now. CMVP #4943 is caveated *"When operated in approved mode"*,
+but the suite runs BC-FIPS in its default mode: `org.bouncycastle.fips.approved_only`
+is never set. In default mode the provider runs its Power-On Self-Tests and
+makes approved algorithms available, but does not restrict non-approved ones,
+and does not enforce approved-mode rules on key generation or IV handling.
+
+What this suite therefore attests to is **packaging integrity** — that the
+correct, unmodified, CMVP-listed JAR is installed at the expected path and
+that the provider initialises and functions in the target runtime. It does
+*not* attest that a consuming application is operating the module in its
+approved mode; that remains the consumer's responsibility.
+
+Enabling approved-only mode here is tracked as follow-up work. It is not a
+one-line change: `testAesGcm` currently supplies its own GCM IV and derives
+keys from the default `SecureRandom`, both of which approved mode rejects
+(*"Attempt to create key with unapproved RNG"*), so those tests need rewriting
+against a FIPS DRBG before the flag can be turned on.
 
 **aarch64 functional tests.** The CI runner is x86_64, so functional tests
 execute only for x86_64. The aarch64 APK integrity is implicitly covered by
